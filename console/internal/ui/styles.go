@@ -40,16 +40,40 @@ var (
 	styleDotReconnecting = lipgloss.NewStyle().Background(colBg).Foreground(colYellow)
 )
 
+// Panes — bordered boxes whose border color signals focus. The focused pane
+// gets an accent border (and an accent title); the rest are dim.
+var (
+	stylePaneFocused = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colAccent)
+
+	stylePaneBlurred = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colDimmer)
+
+	stylePaneTitle       = lipgloss.NewStyle().Foreground(colDim).Bold(true)
+	stylePaneTitleActive = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
+)
+
+// paneStyle picks the focused or blurred pane frame.
+func paneStyle(focused bool) lipgloss.Style {
+	if focused {
+		return stylePaneFocused
+	}
+	return stylePaneBlurred
+}
+
+// paneTitle picks the focused or blurred pane-title style.
+func paneTitle(focused bool) lipgloss.Style {
+	if focused {
+		return stylePaneTitleActive
+	}
+	return stylePaneTitle
+}
+
 // Left column: room list + presence.
 var (
-	styleLeftPanel = lipgloss.NewStyle().
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderRight(true).
-			BorderForeground(colDimmer)
-
-	styleSectionHeader = lipgloss.NewStyle().
-				Foreground(colDim).
-				Bold(true)
+	styleSectionHeader = lipgloss.NewStyle().Foreground(colDim).Bold(true)
 
 	styleRoomNormal = lipgloss.NewStyle().Foreground(colWhite)
 
@@ -68,10 +92,6 @@ var (
 
 // Message feed.
 var (
-	styleFeedHeader = lipgloss.NewStyle().
-			Foreground(colWhite).
-			Bold(true)
-
 	styleFeedHint = lipgloss.NewStyle().Foreground(colDim)
 
 	styleFeedRule = lipgloss.NewStyle().Foreground(colDimmer)
@@ -89,8 +109,26 @@ var (
 	styleBody = lipgloss.NewStyle().Foreground(colWhite)
 )
 
-// Input bar.
-var styleSearchLabel = lipgloss.NewStyle().Foreground(colYellow).Bold(true)
+// Help bar (bottom): the focused zone name plus context-sensitive key hints.
+var (
+	styleHelpBar = lipgloss.NewStyle().Foreground(colDim)
 
-// Focus indicator applied to the focused region's header.
-var styleFocused = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
+	styleHelpZone = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("232")).
+			Background(colAccent).
+			Bold(true).
+			Padding(0, 1)
+
+	styleHelpKey = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
+	styleHelpSep = lipgloss.NewStyle().Foreground(colDimmer)
+)
+
+// Input bar.
+var (
+	styleSearchLabel = lipgloss.NewStyle().Foreground(colYellow).Bold(true)
+
+	// styleInputActive marks the focus bar at the left of the compose line when
+	// it is the focused zone; styleInputIdle when it is not.
+	styleInputActive = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
+	styleInputIdle   = lipgloss.NewStyle().Foreground(colDimmer)
+)

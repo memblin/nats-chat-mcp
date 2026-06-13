@@ -79,18 +79,18 @@ func (m *Model) syncRoomItems() {
 	}
 }
 
-// leftSplit divides the left column's height between the room list and the
-// presence panel (each including its one-line header).
+// leftSplit divides the left pane's content height between the room list and
+// the presence panel (each including its one-line header).
 func (m Model) leftSplit() (roomLines, presenceLines int) {
 	rows := len(m.presenceRows())
 	presenceLines = rows + 1 // header
-	if presenceLines > m.midH/2 {
-		presenceLines = m.midH / 2
+	if presenceLines > m.paneContentH/2 {
+		presenceLines = m.paneContentH / 2
 	}
 	if presenceLines < 1 {
 		presenceLines = 1
 	}
-	roomLines = m.midH - presenceLines - 1 // rooms header
+	roomLines = m.paneContentH - presenceLines - 1 // rooms header
 	if roomLines < 1 {
 		roomLines = 1
 	}
@@ -106,21 +106,13 @@ func (m Model) roomListHeight() int {
 // renderRoomList draws the ROOMS section header and the list body.
 func (m Model) renderRoomList() string {
 	h := m.roomListHeight()
-	header := m.sectionHeader("ROOMS", zoneRooms)
+	header := styleSectionHeader.Render("ROOMS")
 
 	rl := m.roomList
-	rl.SetSize(m.leftW, h)
+	rl.SetSize(m.leftContentW, h)
 	body := rl.View()
 	if len(m.rooms) == 0 {
-		body = stylePresenceIdle.Render("  (no rooms)")
+		body = stylePresenceIdle.Render("(no rooms yet)")
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, body)
-}
-
-// sectionHeader renders a panel header, highlighted when its zone has focus.
-func (m Model) sectionHeader(label string, zone focusZone) string {
-	if m.focus == zone {
-		return styleFocused.Render(label)
-	}
-	return styleSectionHeader.Render(label)
 }

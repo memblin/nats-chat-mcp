@@ -9,10 +9,19 @@ import (
 // onKey routes a key press: global shortcuts first, then by search mode and
 // focus zone.
 func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	// Ctrl+C always quits, even mid-search.
+	if msg.String() == "ctrl+c" {
 		m.quitting = true
 		return m, tea.Quit
+	}
+
+	// Search mode is self-contained: every other key edits/commits the query so
+	// a stray Tab or "/" can't silently change panes underneath it.
+	if m.searching {
+		return m.onSearchKey(msg)
+	}
+
+	switch msg.String() {
 	case "ctrl+]":
 		cmd := m.nextRoom()
 		return m, cmd
@@ -27,9 +36,6 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
-	if m.searching {
-		return m.onSearchKey(msg)
-	}
 	switch m.focus {
 	case zoneCompose:
 		return m.onComposeKey(msg)
@@ -61,6 +67,11 @@ func (m *Model) setFocus(zone focusZone) tea.Cmd {
 func (m Model) onComposeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
+		// Clear a draft, or — when already empty — hop to the feed where search
+		// and scrolling live. This gives a one-key path out of "typing mode".
+		if m.input.Value() == "" {
+			return m, m.setFocus(zoneFeed)
+		}
 		m.input.SetValue("")
 		return m, nil
 	case tea.KeyEnter:

@@ -1,4 +1,4 @@
-// Command nats-console is a standalone terminal chat client for the nats-chat
+// Command nats-chat-console is a standalone terminal chat client for the nats-chat
 // system. It connects directly to the same NATS JetStream server the MCP server
 // uses and participates as a first-class human identity: joining rooms, reading
 // and sending messages, and appearing in list_agents via the presence registry.
@@ -24,7 +24,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	fmt.Println("nats-console — resolved configuration:")
+	fmt.Println("nats-chat-console — resolved configuration:")
 	fmt.Println(cfg.String())
 
 	identity := natsclient.NewIdentity(cfg.Identity)
@@ -51,7 +51,7 @@ func main() {
 	fmt.Println("connected — starting console…")
 
 	model := ui.New(cfg, client)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	prog.Store(p)
 
 	go client.StartHeartbeat(ctx)

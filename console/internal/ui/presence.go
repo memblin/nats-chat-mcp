@@ -31,7 +31,7 @@ func (m Model) presenceRows() []natsclient.Presence {
 // time (now minus last-seen) right-aligned.
 func (m Model) renderPresence() string {
 	_, presenceLines := m.leftSplit()
-	header := m.sectionHeader("PRESENCE", zoneRooms)
+	header := styleSectionHeader.Render("PRESENCE")
 
 	rows := m.presenceRows()
 	visible := presenceLines - 1
@@ -45,8 +45,8 @@ func (m Model) renderPresence() string {
 	lines := make([]string, 0, len(rows))
 	for _, p := range rows {
 		idle := natsclient.FormatIdle(m.now.Sub(p.LastSeenTime()))
-		name := stylePresenceName.Render(truncate(p.Name, m.leftW-len(idle)-2))
-		gap := m.leftW - lipgloss.Width(name) - len(idle)
+		name := stylePresenceName.Render(truncate(p.Name, m.leftContentW-len(idle)-1))
+		gap := m.leftContentW - lipgloss.Width(name) - len(idle)
 		if gap < 1 {
 			gap = 1
 		}

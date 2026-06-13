@@ -1,4 +1,4 @@
-# golangci-lint configuration for the nats-console module (schema v2).
+# golangci-lint configuration for the nats-chat-console module (schema v2).
 version: "2"
 
 run:

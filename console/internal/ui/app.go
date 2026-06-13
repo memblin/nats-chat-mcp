@@ -26,6 +26,7 @@ const (
 	minLeftWidth    = 18
 	minFeedWidth    = 24
 	statusBarLines  = 1
+	helpBarLines    = 1
 	inputBarLines   = 1
 	feedHeaderLines = 2 // room title row + rule row
 )
@@ -63,6 +64,9 @@ type Model struct {
 
 	width, height      int
 	leftW, feedW, midH int
+	leftContentW       int
+	feedContentW       int
+	paneContentH       int
 	ready, started     bool
 	quitting           bool
 
@@ -170,6 +174,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.onKey(msg)
 
+	case tea.MouseMsg:
+		return m.onMouse(msg)
+
 	case tickMsg:
 		m.now = time.Time(msg)
 		return m, tickCmd()
@@ -202,9 +209,9 @@ func (m Model) onResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.computeLayout()
 	m.ready = true
 
-	m.roomList.SetSize(m.leftW, m.roomListHeight())
-	m.viewport.Width = m.feedW
-	m.viewport.Height = m.midH - feedHeaderLines
+	m.roomList.SetSize(m.leftContentW, m.roomListHeight())
+	m.viewport.Width = m.feedContentW
+	m.viewport.Height = m.paneContentH - feedHeaderLines
 	if m.viewport.Height < 1 {
 		m.viewport.Height = 1
 	}
@@ -221,47 +228,64 @@ func (m Model) onResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// computeLayout derives panel dimensions from the terminal size.
+// computeLayout derives panel dimensions from the terminal size. Each pane is a
+// bordered box (+2 in each axis); the vertical stack is status bar + middle +
+// help line + input line.
 func (m *Model) computeLayout() {
-	m.leftW = m.width * 20 / 100
+	m.leftW = m.width * 22 / 100
 	if m.leftW < minLeftWidth {
 		m.leftW = minLeftWidth
 	}
 	if m.leftW > m.width-minFeedWidth {
 		m.leftW = m.width - minFeedWidth
 	}
-	if m.leftW < 1 {
-		m.leftW = 1
+	if m.leftW < 3 {
+		m.leftW = 3
 	}
-	// left panel carries a right border (+1 column).
-	m.feedW = m.width - m.leftW - 1
-	if m.feedW < 1 {
-		m.feedW = 1
+	m.feedW = m.width - m.leftW
+	if m.feedW < 3 {
+		m.feedW = 3
 	}
-	m.midH = m.height - statusBarLines - inputBarLines
-	if m.midH < 1 {
-		m.midH = 1
+	m.leftContentW = m.leftW - 2 // rounded border on both sides
+	m.feedContentW = m.feedW - 2
+	if m.leftContentW < 1 {
+		m.leftContentW = 1
+	}
+	if m.feedContentW < 1 {
+		m.feedContentW = 1
+	}
+
+	m.midH = m.height - statusBarLines - helpBarLines - inputBarLines
+	if m.midH < 3 {
+		m.midH = 3
+	}
+	m.paneContentH = m.midH - 2 // top/bottom border
+	if m.paneContentH < 1 {
+		m.paneContentH = 1
 	}
 }
 
-// View composes the four regions.
+// View composes the five regions: status bar, the two panes, a help line, and
+// the input bar.
 func (m Model) View() string {
 	if !m.ready {
-		return "initializing nats-console…"
+		return "initializing nats-chat-console…"
 	}
 	status := m.renderStatusBar()
-	left := styleLeftPanel.Height(m.midH).Render(m.renderLeft())
-	feed := m.renderFeedPanel()
-	middle := lipgloss.JoinHorizontal(lipgloss.Top, left, feed)
+	middle := lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(), m.renderFeedPane())
+	help := m.renderHelp()
 	input := m.renderInput()
-	return lipgloss.JoinVertical(lipgloss.Left, status, middle, input)
+	return lipgloss.JoinVertical(lipgloss.Left, status, middle, help, input)
 }
 
-// renderLeft stacks the room list and presence panel within the left column.
-func (m Model) renderLeft() string {
-	rooms := m.renderRoomList()
-	presence := m.renderPresence()
-	return lipgloss.JoinVertical(lipgloss.Left, rooms, presence)
+// renderLeftPane draws the bordered left column (room list + presence); its
+// border is accented when the rooms zone has focus.
+func (m Model) renderLeftPane() string {
+	content := lipgloss.JoinVertical(lipgloss.Left, m.renderRoomList(), m.renderPresence())
+	return paneStyle(m.focus == zoneRooms).
+		Width(m.leftContentW).
+		Height(m.paneContentH).
+		Render(content)
 }
 
 // --- helpers shared across files ---

@@ -25,7 +25,7 @@ type Config struct {
 // Resolve parses args (typically os.Args[1:]) and overlays them on environment
 // variables and defaults. Priority: flag > env var > default.
 func Resolve(args []string) (Config, error) {
-	fs := flag.NewFlagSet("nats-console", flag.ContinueOnError)
+	fs := flag.NewFlagSet("nats-chat-console", flag.ContinueOnError)
 	natsURL := fs.String("nats-url", "", "NATS server URL (env NATS_URL)")
 	identity := fs.String("identity", "", "your display name in rooms (env NATS_IDENTITY)")
 	room := fs.String("room", "", "room to join on startup (env NATS_DEFAULT_ROOM)")

@@ -158,7 +158,7 @@ func Connect(ctx context.Context, url string, id Identity, sink EventSink) (*Cli
 	}
 
 	nc, err := nats.Connect(url,
-		nats.Name("nats-console:"+id.Name),
+		nats.Name("nats-chat-console:"+id.Name),
 		nats.MaxReconnects(-1),
 		// Exponential backoff, capped, so a downed server is retried forever
 		// without hammering it.

@@ -11,7 +11,7 @@ import (
 // renderStatusBar draws the full-width top bar: app name, identity@server, the
 // active room, and a colored connection dot.
 func (m Model) renderStatusBar() string {
-	app := styleStatusApp.Render("nats-console")
+	app := styleStatusApp.Render("nats-chat-console")
 
 	who := m.self.Name + " @ " + hostOf(m.cfg.NatsURL)
 	ident := styleStatusSeg.Render(who)
