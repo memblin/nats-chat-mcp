@@ -2,9 +2,67 @@
 
 An MCP server for inter-session communication between Claude Code instances. Built on NATS JetStream, it provides room-based messaging, direct agent communication, presence tracking, and message history. Multiple Claude sessions can register as agents, join rooms, exchange messages, and coordinate work across distributed teams.
 
+## Prerequisites
+
+- **Node.js >= 20**
+- **A reachable NATS server with JetStream enabled** — every tool persists to and
+  reads from JetStream, so the server must be started with `-js` (or the equivalent
+  config). The connection target is set via the `NATS_URL` env var (defaults to
+  `nats://localhost:4222`).
+- **Docker** — only for running the integration test suite (Testcontainers boots a
+  throwaway broker); not needed to run the server itself.
+
 ## Installation
 
-Add this to your `.mcp.json`:
+> This package is not yet published to npm. Until it is, install from a local
+> checkout using the link method below. The `npx` form is shown for reference once
+> a release is published.
+
+### Local install (current — for an unpublished build)
+
+Build the package and link it so the `claude-connect-nats-mcp` bin is on your PATH:
+
+```bash
+git clone https://github.com/memblin/claude-connect-nats-mcp.git
+cd claude-connect-nats-mcp
+npm install
+npm run build
+npm link          # exposes the claude-connect-nats-mcp bin globally
+```
+
+Then point your `.mcp.json` at the linked bin:
+
+```json
+{
+  "mcpServers": {
+    "nats-chat": {
+      "command": "claude-connect-nats-mcp",
+      "env": {
+        "NATS_URL": "nats://nats01.tkclabs.io:4222"
+      }
+    }
+  }
+}
+```
+
+Alternatively, skip `npm link` and point directly at the built entry file with an
+absolute path:
+
+```json
+{
+  "mcpServers": {
+    "nats-chat": {
+      "command": "node",
+      "args": ["/absolute/path/to/claude-connect-nats-mcp/dist/index.js"],
+      "env": {
+        "NATS_URL": "nats://nats01.tkclabs.io:4222"
+      }
+    }
+  }
+}
+```
+
+### Once published (reference)
 
 ```json
 {
@@ -22,7 +80,7 @@ Add this to your `.mcp.json`:
 
 ## Available Tools
 
-- **register_agent** — Register this session as a named agent with a role
+- **register_agent** — Register this session as a named agent
 - **get_status** — Get current agent identity and connection status
 - **join_room** — Join a named room for multi-agent coordination
 - **leave_room** — Leave a room
@@ -34,12 +92,38 @@ Add this to your `.mcp.json`:
 - **send_direct** — Send a direct message to another agent
 - **check_direct** — Check for direct messages
 
+## Development
+
+```bash
+npm run build         # compile TypeScript to dist/
+npm run typecheck     # type-check without emitting
+npm run dev           # run from source via tsx
+npm run test          # integration tests (requires a running Docker daemon)
+```
+
+Integration tests use [Testcontainers](https://testcontainers.com/) to boot a
+throwaway JetStream-enabled NATS broker and exercise the real publish / consume
+/ KV / history paths — so a Docker daemon must be reachable. No external NATS
+server is needed; the broker is created and torn down per run.
+
+## Roadmap
+
+- **Console watcher / history search CLI** — a standalone command (launchable from
+  a terminal, separate from the MCP stdio server) to _watch_ room and direct
+  traffic live and _search_ retained JetStream history yourself, outside of any
+  Claude session. Intended for operators to observe and audit inter-agent
+  coordination directly.
+
 ## Recommended Session Startup Workflow
 
 1. Load the `claude-connect-nats-mcp` MCP server in your Claude session
-2. Call `register_agent` with your session name and role (e.g., "build-seat-1", "validator", "lead")
+2. Call `register_agent` with your session name (e.g., "build-seat-1", "validator", "lead")
 3. Optionally join rooms with `join_room` (e.g., "team-sync", "release-coordination")
 4. Use `send_message` to broadcast to rooms, `send_direct` for point-to-point
 5. Poll for updates with `check_messages` and `check_direct` at key coordination points
 6. Check `list_agents` and `list_rooms` to understand team composition
 7. Call `get_history` for context on past room conversations
+
+## License
+
+[Apache-2.0](./LICENSE)

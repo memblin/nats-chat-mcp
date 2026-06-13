@@ -1,7 +1,10 @@
+// Shared data shapes that flow through the system: agent identities, the
+// presence records stored in the KV registry, and the messages published to
+// NATS subjects. Every JSON payload on the wire conforms to one of these.
+
 export interface AgentIdentity {
   id: string;
   name: string;
-  role: string;
 }
 
 export interface AgentPresence extends AgentIdentity {
@@ -13,7 +16,6 @@ export interface Message {
   id: string;
   from: string;
   from_id: string;
-  role: string;
   room?: string;
   content: string;
   timestamp: string;
