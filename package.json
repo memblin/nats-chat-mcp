@@ -1,5 +1,5 @@
 {
-  "name": "claude-connect-nats-mcp",
+  "name": "@memblin/nats-chat",
   "version": "0.1.0",
   "description": "MCP server for Claude Code inter-session communication via NATS JetStream",
   "type": "module",
@@ -7,11 +7,11 @@
   "author": "Chris Row <chris.row@discursive.org>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/memblin/claude-connect-nats-mcp.git"
+    "url": "git+https://github.com/memblin/nats-chat-mcp.git"
   },
-  "homepage": "https://github.com/memblin/claude-connect-nats-mcp#readme",
+  "homepage": "https://github.com/memblin/nats-chat-mcp#readme",
   "bugs": {
-    "url": "https://github.com/memblin/claude-connect-nats-mcp/issues"
+    "url": "https://github.com/memblin/nats-chat-mcp/issues"
   },
   "keywords": [
     "mcp",
@@ -26,7 +26,7 @@
   },
   "main": "dist/index.js",
   "bin": {
-    "claude-connect-nats-mcp": "dist/index.js"
+    "nats-chat": "dist/index.js"
   },
   "files": [
     "dist"

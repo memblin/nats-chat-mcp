@@ -22,7 +22,7 @@ let activeUrl = NATS_URL;
 export async function connectNats(servers: string = NATS_URL): Promise<void> {
   if (nc) return;
   activeUrl = servers;
-  nc = await connect({ servers, name: "claude-connect-nats-mcp" });
+  nc = await connect({ servers, name: "nats-chat" });
   js = nc.jetstream();
   jsm = await nc.jetstreamManager();
 }

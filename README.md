@@ -1,4 +1,4 @@
-# claude-connect-nats-mcp
+# nats-chat-mcp
 
 An MCP server for inter-session communication between Claude Code instances. Built on NATS JetStream, it provides room-based messaging, direct agent communication, presence tracking, and message history. Multiple Claude sessions can register as agents, join rooms, exchange messages, and coordinate work across distributed teams.
 
@@ -20,14 +20,14 @@ An MCP server for inter-session communication between Claude Code instances. Bui
 
 ### Local install (current — for an unpublished build)
 
-Build the package and link it so the `claude-connect-nats-mcp` bin is on your PATH:
+Build the package and link it so the `nats-chat` bin is on your PATH:
 
 ```bash
-git clone https://github.com/memblin/claude-connect-nats-mcp.git
-cd claude-connect-nats-mcp
+git clone https://github.com/memblin/nats-chat-mcp.git
+cd nats-chat-mcp
 npm install
 npm run build
-npm link          # exposes the claude-connect-nats-mcp bin globally
+npm link          # exposes the nats-chat bin globally
 ```
 
 Then point your `.mcp.json` at the linked bin:
@@ -36,7 +36,7 @@ Then point your `.mcp.json` at the linked bin:
 {
   "mcpServers": {
     "nats-chat": {
-      "command": "claude-connect-nats-mcp",
+      "command": "nats-chat",
       "env": {
         "NATS_URL": "nats://nats01.tkclabs.io:4222"
       }
@@ -53,7 +53,7 @@ absolute path:
   "mcpServers": {
     "nats-chat": {
       "command": "node",
-      "args": ["/absolute/path/to/claude-connect-nats-mcp/dist/index.js"],
+      "args": ["/absolute/path/to/nats-chat-mcp/dist/index.js"],
       "env": {
         "NATS_URL": "nats://nats01.tkclabs.io:4222"
       }
@@ -69,7 +69,7 @@ absolute path:
   "mcpServers": {
     "nats-chat": {
       "command": "npx",
-      "args": ["-y", "claude-connect-nats-mcp"],
+      "args": ["-y", "@memblin/nats-chat"],
       "env": {
         "NATS_URL": "nats://nats01.tkclabs.io:4222"
       }
@@ -117,7 +117,7 @@ server is needed; the broker is created and torn down per run.
 
 ## Recommended Session Startup Workflow
 
-1. Load the `claude-connect-nats-mcp` MCP server in your Claude session
+1. Load the `nats-chat` MCP server in your Claude session
 2. Call `register_agent` with your session name (e.g., "build-seat-1", "validator", "lead")
 3. Optionally join rooms with `join_room` (e.g., "team-sync", "release-coordination")
 4. Use `send_message` to broadcast to rooms, `send_direct` for point-to-point
