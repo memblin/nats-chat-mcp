@@ -15,6 +15,7 @@ import { registerRoomTools } from "./rooms.js";
 import { registerMessagingTools } from "./messaging.js";
 import { registerDirectTools } from "./direct.js";
 import { registerAgentsTools } from "./agents.js";
+import { registerWaitTools } from "./wait.js";
 
 /** Helper shared by tool modules: shape a JSON value as MCP text content. */
 export function jsonResult(value: unknown) {
@@ -29,6 +30,7 @@ export function registerAllTools(server: McpServer): void {
   registerMessagingTools(server);
   registerDirectTools(server);
   registerAgentsTools(server);
+  registerWaitTools(server);
 }
 
 function registerIdentityTools(server: McpServer): void {

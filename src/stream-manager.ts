@@ -9,6 +9,7 @@ import {
   JSONCodec,
   nanos,
   type Consumer,
+  type ConsumerMessages,
   type KV,
 } from "nats";
 import { getJetStream, getManager } from "./nats-client.js";
@@ -28,6 +29,11 @@ const MESSAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MESSAGE_MAX_PER_SUBJECT = 1000;
 const CONSUMER_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
 const PRESENCE_TTL_MS = 2 * 60 * 60 * 1000;
+
+// After the first message wakes a blocking wait, keep gathering for this brief
+// window so a burst of messages arriving a few-score ms apart all land in the
+// same response rather than being split across two calls.
+const WAIT_SETTLE_MS = 200;
 
 const roomSubject = (room: string) => `chat.room.${room}.msg`;
 const directSubject = (agentId: string) => `chat.direct.${agentId}.msg`;
@@ -288,6 +294,97 @@ async function drainConsumer(
     msg.ack();
   }
   return out;
+}
+
+// ---------------------------------------------------------------------------
+// Blocking wait — wake on first delivery across all of an agent's subjects.
+//
+// Where fetchRoomMessages / fetchDirectMessages do a single bounded pull and
+// return whatever is queued right now, waitForMessages BLOCKS until something
+// arrives (or the timeout fires). It does this by opening a push-style
+// continuous read (consume()) on each of the agent's existing durable
+// consumers, so the server delivers the moment a message is published rather
+// than on a polling timer. Because it rides the SAME durable consumers that
+// the check_* tools drain — and acks every message it returns — a message is
+// never handed back by both this and a later check_messages / check_direct.
+// ---------------------------------------------------------------------------
+
+export interface WaitResult {
+  roomMessages: Message[];
+  directMessages: Message[];
+}
+
+export async function waitForMessages(
+  agentId: string,
+  rooms: string[],
+  timeoutMs: number,
+): Promise<WaitResult> {
+  const js = getJetStream();
+  const roomMessages: Message[] = [];
+  const directMessages: Message[] = [];
+
+  // Resolve `firstMessage` the instant any subject delivers, so the wait wakes
+  // on delivery instead of running the clock down.
+  let wake: () => void = () => {};
+  const firstMessage = new Promise<void>((resolve) => {
+    wake = resolve;
+  });
+
+  const subscriptions: ConsumerMessages[] = [];
+
+  // Open a continuous read on one durable consumer, draining each delivery into
+  // `bucket` and acking it (which advances the shared server-side cursor so the
+  // message won't be re-delivered to a later check_* call).
+  const pump = async (consumer: Consumer, bucket: Message[]): Promise<void> => {
+    const iter = await consumer.consume({ max_messages: 100 });
+    subscriptions.push(iter);
+    try {
+      for await (const msg of iter) {
+        try {
+          bucket.push(msg.json<Message>());
+        } catch {
+          /* skip malformed payload */
+        }
+        msg.ack();
+        wake();
+      }
+    } catch {
+      /* iterator stopped or consumer went away — nothing left to gather */
+    }
+  };
+
+  const roomConsumers = await Promise.all(
+    rooms.map((room) =>
+      js.consumers.get(ROOM_STREAM, roomConsumerName(agentId, room)),
+    ),
+  );
+  const directConsumer = await js.consumers.get(
+    DIRECT_STREAM,
+    directConsumerName(agentId),
+  );
+
+  const pumps = [
+    ...roomConsumers.map((c) => pump(c, roomMessages)),
+    pump(directConsumer, directMessages),
+  ];
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+
+  await Promise.race([firstMessage, timeout]);
+
+  // Woken by a delivery? Linger briefly to sweep up a closely-following burst.
+  if (roomMessages.length > 0 || directMessages.length > 0) {
+    await new Promise<void>((resolve) => setTimeout(resolve, WAIT_SETTLE_MS));
+  }
+
+  if (timer) clearTimeout(timer);
+  for (const iter of subscriptions) iter.stop();
+  await Promise.allSettled(pumps);
+
+  return { roomMessages, directMessages };
 }
 
 // ---------------------------------------------------------------------------

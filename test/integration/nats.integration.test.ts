@@ -13,12 +13,14 @@ import {
   fetchDirectMessages,
   publishDirectMessage,
   listPresence,
+  waitForMessages,
 } from "../../src/stream-manager.js";
 import { register, newMessage, syncPresence } from "../../src/identity.js";
 
 let nats: NatsHandle;
 let roomSeq = 0;
 const uniqueRoom = () => `room-${++roomSeq}`;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 beforeAll(async () => {
   nats = await startNats();
@@ -89,6 +91,76 @@ describe("direct messages", () => {
     const inbox = await fetchDirectMessages(recipientId);
     expect(inbox.map((m) => m.content)).toContain("ping dave");
     expect(inbox.every((m) => m.from === "erin")).toBe(true);
+  });
+});
+
+describe("wait_for_message (blocking wait)", () => {
+  test("wakes immediately when a room message arrives during the wait", async () => {
+    const room = uniqueRoom();
+    const me = await register("grace");
+    // register_agent + join_room create these in production; mirror that so the
+    // wait has both its room consumer and its direct inbox to listen on.
+    await ensureDirectConsumer(me.id);
+    await ensureRoomConsumer(me.id, room);
+
+    // Begin blocking, then publish once the push consumer has attached.
+    const waiting = waitForMessages(me.id, [room], 5000);
+    await sleep(250);
+    await publishRoomMessage(room, newMessage("wake up", { room }));
+
+    const result = await waiting;
+    expect(result.roomMessages.map((m) => m.content)).toContain("wake up");
+    expect(result.directMessages).toHaveLength(0);
+  });
+
+  test("wakes when a direct message arrives during the wait", async () => {
+    const recipient = await register("heidi");
+    await ensureDirectConsumer(recipient.id);
+    const recipientId = recipient.id;
+
+    const waiting = waitForMessages(recipientId, [], 5000);
+    await sleep(250);
+    // A different session sends the DM to heidi's inbox.
+    await register("ivan");
+    await publishDirectMessage(recipientId, newMessage("dm wake"));
+
+    const result = await waiting;
+    expect(result.directMessages.map((m) => m.content)).toContain("dm wake");
+    expect(result.roomMessages).toHaveLength(0);
+  });
+
+  test("returns an empty result after a clean timeout", async () => {
+    const room = uniqueRoom();
+    const me = await register("judy");
+    await ensureDirectConsumer(me.id);
+    await ensureRoomConsumer(me.id, room);
+
+    const start = Date.now();
+    const result = await waitForMessages(me.id, [room], 600);
+    const elapsed = Date.now() - start;
+
+    expect(result.roomMessages).toHaveLength(0);
+    expect(result.directMessages).toHaveLength(0);
+    // It blocked for roughly the timeout rather than returning instantly.
+    expect(elapsed).toBeGreaterThanOrEqual(550);
+  });
+
+  test("accumulates several messages that arrive close together", async () => {
+    const room = uniqueRoom();
+    const me = await register("kevin");
+    await ensureDirectConsumer(me.id);
+    await ensureRoomConsumer(me.id, room);
+
+    const waiting = waitForMessages(me.id, [room], 5000);
+    await sleep(250);
+    await publishRoomMessage(room, newMessage("first", { room }));
+    await sleep(100);
+    await publishRoomMessage(room, newMessage("second", { room }));
+
+    const result = await waiting;
+    expect(result.roomMessages.map((m) => m.content)).toEqual(
+      expect.arrayContaining(["first", "second"]),
+    );
   });
 });
 

@@ -86,6 +86,7 @@ absolute path:
 - **leave_room** — Leave a room
 - **send_message** — Broadcast a message to a room
 - **check_messages** — Poll for new messages in joined rooms
+- **wait_for_message** — Block until a message arrives on any joined room or this agent's direct inbox (wakes on delivery, not a timer), returning everything received during the wait; returns an empty result on timeout
 - **get_history** — Retrieve message history for a room
 - **list_rooms** — List all active rooms and their members
 - **list_agents** — List all registered agents and their presence
