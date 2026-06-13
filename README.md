@@ -1,4 +1,4 @@
-# claude-nats-mcp
+# claude-connect-nats-mcp
 
 An MCP server for inter-session communication between Claude Code instances. Built on NATS JetStream, it provides room-based messaging, direct agent communication, presence tracking, and message history. Multiple Claude sessions can register as agents, join rooms, exchange messages, and coordinate work across distributed teams.
 
@@ -11,7 +11,7 @@ Add this to your `.mcp.json`:
   "mcpServers": {
     "nats-chat": {
       "command": "npx",
-      "args": ["-y", "claude-nats-mcp"],
+      "args": ["-y", "claude-connect-nats-mcp"],
       "env": {
         "NATS_URL": "nats://nats01.tkclabs.io:4222"
       }
@@ -36,7 +36,7 @@ Add this to your `.mcp.json`:
 
 ## Recommended Session Startup Workflow
 
-1. Load the `claude-nats-mcp` MCP server in your Claude session
+1. Load the `claude-connect-nats-mcp` MCP server in your Claude session
 2. Call `register_agent` with your session name and role (e.g., "build-seat-1", "validator", "lead")
 3. Optionally join rooms with `join_room` (e.g., "team-sync", "release-coordination")
 4. Use `send_message` to broadcast to rooms, `send_direct` for point-to-point

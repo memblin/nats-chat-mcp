@@ -1,11 +1,11 @@
 {
-  "name": "claude-nats-mcp",
+  "name": "claude-connect-nats-mcp",
   "version": "0.1.0",
   "description": "MCP server for Claude Code inter-session communication via NATS JetStream",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "claude-nats-mcp": "dist/index.js"
+    "claude-connect-nats-mcp": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
