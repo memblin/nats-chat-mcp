@@ -1,2 +1,11 @@
 npx lint-staged
 npm run typecheck
+
+# Go console — only when console/ files are staged
+if git diff --cached --name-only | grep -q '^console/'; then
+  echo "Running Go checks for console/..."
+  cd console
+  go fmt ./...
+  golangci-lint run ./...
+  cd ..
+fi

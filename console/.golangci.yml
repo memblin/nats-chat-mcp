@@ -1,0 +1,16 @@
+# golangci-lint configuration for the nats-chat-console module (schema v2).
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck # unchecked errors
+    - govet # suspicious constructs
+    - staticcheck # broad correctness/style analysis
+    - unused # unused code
+
+formatters:
+  enable:
+    - gofmt # canonical formatting

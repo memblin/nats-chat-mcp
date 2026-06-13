@@ -1,0 +1,47 @@
+name: console
+
+# Build, test, and lint the Go TUI console. Scoped to console/ so it never runs
+# for TypeScript-only changes (and the TypeScript CI never runs for console-only
+# changes).
+on:
+  push:
+    paths:
+      - "console/**"
+      - ".github/workflows/console.yml"
+  pull_request:
+    paths:
+      - "console/**"
+      - ".github/workflows/console.yml"
+
+defaults:
+  run:
+    working-directory: console
+
+jobs:
+  build:
+    name: build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: console/go.mod
+          cache-dependency-path: console/go.sum
+      - name: go build
+        run: go build ./...
+      - name: go test
+        run: go test ./...
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: console/go.mod
+          cache-dependency-path: console/go.sum
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          working-directory: console
