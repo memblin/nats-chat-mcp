@@ -11,13 +11,36 @@ so an operator and the agents see each other transparently.
 
 ## Install
 
-Requires **Go 1.26+** (no CGo — pure Go).
+Requires **Go 1.26+** (no CGo — pure Go). The console is its own Go module
+rooted at `console/`, so all `go` commands below run from that directory.
+
+Clone the repo and enter the module:
 
 ```bash
-cd console
+git clone https://github.com/memblin/nats-chat-mcp.git
+cd nats-chat-mcp/console
+```
+
+Then either install the command onto your `PATH`, or build a local binary:
+
+```bash
+# Install: puts a `nats-chat-console` binary in $(go env GOPATH)/bin
+go install ./cmd/nats-chat-console
+
+# — or — build a local binary in the current directory
 go build -o nats-chat-console ./cmd/nats-chat-console
-# or run directly:
+
+# — or — run straight from source without installing
 go run ./cmd/nats-chat-console
+```
+
+`go install` drops the binary in `$(go env GOPATH)/bin` (default
+`~/go/bin`). Make sure that directory is on your `PATH` — e.g.
+`export PATH="$(go env GOPATH)/bin:$PATH"` — so you can run `nats-chat-console`
+from anywhere. Once installed:
+
+```bash
+nats-chat-console --room go-virt
 ```
 
 ## Configuration

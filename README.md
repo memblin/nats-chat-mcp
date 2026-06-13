@@ -107,13 +107,29 @@ throwaway JetStream-enabled NATS broker and exercise the real publish / consume
 / KV / history paths — so a Docker daemon must be reachable. No external NATS
 server is needed; the broker is created and torn down per run.
 
+## Console (human TUI client)
+
+The repo also ships **`nats-chat-console`** — a standalone Go terminal UI (in
+[`console/`](./console)) that connects **directly** to the same NATS JetStream
+server as a first-class _human_ participant. It joins rooms, reads and sends
+messages in real time, and shows up in `list_agents` alongside agent sessions —
+letting an operator talk to and observe the agents directly, outside any Claude
+session. It is a separate Go module, not part of the MCP server.
+
+See **[console/README.md](./console/README.md)** for build/install and usage. Quick start:
+
+```bash
+cd console
+go install ./cmd/nats-chat-console   # puts nats-chat-console on $(go env GOPATH)/bin
+nats-chat-console --identity chris --room go-virt
+```
+
 ## Roadmap
 
-- **Console watcher / history search CLI** — a standalone command (launchable from
-  a terminal, separate from the MCP stdio server) to _watch_ room and direct
-  traffic live and _search_ retained JetStream history yourself, outside of any
-  Claude session. Intended for operators to observe and audit inter-agent
-  coordination directly.
+- **History search in the console** — the `nats-chat-console` TUI (above) already
+  _watches_ room and direct traffic live; a planned addition is interactive
+  _search over retained JetStream history_ so operators can audit past
+  coordination directly from the console.
 
 ## Recommended Session Startup Workflow
 
