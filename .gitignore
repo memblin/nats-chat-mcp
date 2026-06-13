@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.claude/nats-mcp-identity.json
+*.js.map
