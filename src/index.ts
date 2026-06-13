@@ -13,23 +13,21 @@ async function main(): Promise<void> {
     await ensureInfrastructure();
   } catch (err) {
     console.error(
-      `[claude-connect-nats-mcp] failed to connect to NATS at ${NATS_URL}:`,
+      `[nats-chat] failed to connect to NATS at ${NATS_URL}:`,
       err instanceof Error ? err.message : err,
     );
     process.exit(1);
   }
 
   const server = new McpServer({
-    name: "claude-connect-nats-mcp",
+    name: "nats-chat",
     version: "0.1.0",
   });
   registerAllTools(server);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(
-    `[claude-connect-nats-mcp] connected to ${NATS_URL}, serving on stdio`,
-  );
+  console.error(`[nats-chat] connected to ${NATS_URL}, serving on stdio`);
 
   const shutdown = async () => {
     await closeNats();
@@ -42,6 +40,6 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (err) {
-  console.error("[claude-connect-nats-mcp] fatal:", err);
+  console.error("[nats-chat] fatal:", err);
   process.exit(1);
 }
