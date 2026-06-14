@@ -9,10 +9,16 @@ import (
 // onKey routes a key press: global shortcuts first, then by search mode and
 // focus zone.
 func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Ctrl+C always quits, even mid-search.
+	// Ctrl+C always quits, even mid-search or mid-confirm.
 	if msg.String() == "ctrl+c" {
 		m.quitting = true
 		return m, tea.Quit
+	}
+
+	// A confirmation modal is fully modal: it captures every key (y confirms,
+	// anything else cancels) so nothing underneath can react.
+	if m.confirm != nil {
+		return m.onConfirmKey(msg)
 	}
 
 	// Search mode is self-contained: every other key edits/commits the query so
@@ -131,9 +137,35 @@ func (m Model) onRoomsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case "enter":
 		return m, m.setFocus(zoneFeed)
+	case "x":
+		// Evict stale participants in the active room.
+		return m.startEvict(m.activeName())
+	case "X":
+		// Evict stale participants everywhere.
+		return m.startEvict("")
 	case "q":
 		m.quitting = true
 		return m, tea.Quit
+	}
+	return m, nil
+}
+
+// startEvict opens the eviction confirmation for the stale participants in room
+// (or everywhere when room is ""). The modal opens even when none are stale, so
+// the key never feels dead — it then just reports there is nothing to do.
+func (m Model) startEvict(room string) (tea.Model, tea.Cmd) {
+	targets := staleParticipants(m.presence, m.now, room, m.self.ID)
+	m.confirm = &confirmState{scope: room, targets: targets}
+	return m, nil
+}
+
+// onConfirmKey handles keys while the eviction modal is open: y/Y evicts, every
+// other key (including Esc) cancels.
+func (m Model) onConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	targets := m.confirm.targets
+	m.confirm = nil
+	if s := msg.String(); (s == "y" || s == "Y") && len(targets) > 0 {
+		return m, m.evictCmd(targets)
 	}
 	return m, nil
 }
