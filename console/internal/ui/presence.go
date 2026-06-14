@@ -1,19 +1,51 @@
 package ui
 
 import (
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 
 	natsclient "github.com/memblin/nats-chat-mcp/console/internal/nats"
 )
 
+// presenceStaleThreshold is how long since a participant's last_seen before its
+// row is dimmed as "probably gone". Healthy participants refresh well inside it
+// (console heartbeats every 30s; an agent re-syncs at the top of every
+// wait_for_message, ≤2min in a wait loop), so a dimmed row means we genuinely
+// haven't heard from it — it will be TTL-evicted entirely once it passes
+// presenceTTL.
+const presenceStaleThreshold = 2 * time.Minute
+
+// dedupePresence collapses records that share a display name, keeping the one
+// with the freshest last_seen, and returns them sorted by name. A session that
+// restarts mints a fresh id, so its dead record lingers under the same name
+// until its TTL expires; without this the panel would show it alongside the
+// live one. Trade-off: two genuinely-live participants sharing a display name
+// collapse to a single row — operators give distinct names to disambiguate.
+func dedupePresence(in []natsclient.Presence) []natsclient.Presence {
+	freshest := make(map[string]natsclient.Presence, len(in))
+	for _, p := range in {
+		if cur, ok := freshest[p.Name]; !ok || p.LastSeenTime().After(cur.LastSeenTime()) {
+			freshest[p.Name] = p
+		}
+	}
+	out := make([]natsclient.Presence, 0, len(freshest))
+	for _, p := range freshest {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
 // presenceRows returns the agents to show in the panel: those present in the
-// active room, or everyone when no room is active.
+// active room, or everyone when no room is active. Same-name duplicates are
+// collapsed to their freshest record.
 func (m Model) presenceRows() []natsclient.Presence {
 	room := m.activeName()
 	if room == "" || room == directBucket {
-		return m.presence
+		return dedupePresence(m.presence)
 	}
 	out := make([]natsclient.Presence, 0, len(m.presence))
 	for _, p := range m.presence {
@@ -24,7 +56,7 @@ func (m Model) presenceRows() []natsclient.Presence {
 			}
 		}
 	}
-	return out
+	return dedupePresence(out)
 }
 
 // renderPresence draws the PRESENCE section: each agent's name with its idle
@@ -44,8 +76,13 @@ func (m Model) renderPresence() string {
 
 	lines := make([]string, 0, len(rows))
 	for _, p := range rows {
-		idle := natsclient.FormatIdle(m.now.Sub(p.LastSeenTime()))
-		name := stylePresenceName.Render(truncate(p.Name, m.leftContentW-len(idle)-1))
+		elapsed := m.now.Sub(p.LastSeenTime())
+		idle := natsclient.FormatIdle(elapsed)
+		nameStyle := stylePresenceName
+		if elapsed > presenceStaleThreshold {
+			nameStyle = stylePresenceNameStale // probably gone — haven't heard from it
+		}
+		name := nameStyle.Render(truncate(p.Name, m.leftContentW-len(idle)-1))
 		gap := m.leftContentW - lipgloss.Width(name) - len(idle)
 		if gap < 1 {
 			gap = 1

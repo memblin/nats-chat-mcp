@@ -44,9 +44,16 @@ const (
 	messageMaxMsgPerSubj   = 1000
 	consumerInactiveThresh = 7 * 24 * time.Hour
 
-	// Presence bucket config.
+	// Presence bucket config. The TTL is the linger window: the server expires a
+	// record this long after its last write, so a session that dies without
+	// publishing a departure (DeletePresence) clears on its own. Kept short
+	// because every live participant refreshes well inside it — the console
+	// heartbeats every 30s, and an agent re-syncs on each tool call and at the
+	// top of every wait_for_message (≤2min in a wait loop). Must match the MCP's
+	// PRESENCE_TTL_MS (src/stream-manager.ts) so a console-created bucket is
+	// identical to an MCP-created one.
 	presenceHistory = 1
-	presenceTTL     = 2 * time.Hour
+	presenceTTL     = 15 * time.Minute
 )
 
 // RoomSubject returns the subject room broadcasts are published to.
