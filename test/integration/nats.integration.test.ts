@@ -20,6 +20,7 @@ import {
   newAck,
   newMessage,
   syncPresence,
+  resetIdentityForTests,
 } from "../../src/identity.js";
 
 let nats: NatsHandle;
@@ -44,6 +45,10 @@ describe("room messaging", () => {
     const me = await register("alice");
     await ensureRoomConsumer(me.id, room);
 
+    // A different agent broadcasts — an agent's own posts are filtered from its
+    // reads, so the sender must be a distinct identity, not this session.
+    resetIdentityForTests();
+    await register("peer");
     await publishRoomMessage(room, newMessage("hello room", { room }));
 
     const first = await fetchRoomMessages(me.id, room);
@@ -89,7 +94,9 @@ describe("direct messages", () => {
     await ensureDirectConsumer(recipient.id);
     const recipientId = recipient.id;
 
-    // sender re-registers this session as someone else, then DMs the recipient
+    // The sender is a separate agent session (distinct id), then DMs the
+    // recipient — a DM from the recipient itself would be filtered as self-echo.
+    resetIdentityForTests();
     await register("erin");
     await publishDirectMessage(recipientId, newMessage("ping dave"));
 
@@ -108,9 +115,12 @@ describe("wait_for_message (blocking wait)", () => {
     await ensureDirectConsumer(me.id);
     await ensureRoomConsumer(me.id, room);
 
-    // Begin blocking, then publish once the push consumer has attached.
+    // Begin blocking, then publish once the push consumer has attached. The
+    // sender is a different agent — a self-authored post wouldn't wake the wait.
     const waiting = waitForMessages(me.id, [room], 5000);
     await sleep(250);
+    resetIdentityForTests();
+    await register("peer");
     await publishRoomMessage(room, newMessage("wake up", { room }));
 
     const result = await waiting;
@@ -125,7 +135,8 @@ describe("wait_for_message (blocking wait)", () => {
 
     const waiting = waitForMessages(recipientId, [], 5000);
     await sleep(250);
-    // A different session sends the DM to heidi's inbox.
+    // A different session (distinct id) sends the DM to heidi's inbox.
+    resetIdentityForTests();
     await register("ivan");
     await publishDirectMessage(recipientId, newMessage("dm wake"));
 
@@ -156,6 +167,9 @@ describe("wait_for_message (blocking wait)", () => {
     await ensureDirectConsumer(me.id);
     await ensureRoomConsumer(me.id, room);
 
+    // Both messages come from another agent, arriving close together.
+    resetIdentityForTests();
+    await register("peer");
     const waiting = waitForMessages(me.id, [room], 5000);
     await sleep(250);
     await publishRoomMessage(room, newMessage("first", { room }));
@@ -179,6 +193,23 @@ describe("presence registry (KV)", () => {
     expect(self).toBeDefined();
     expect(self!.name).toBe("frank");
     expect(self!.last_seen).toBeTruthy();
+  });
+
+  test("lists every distinct registered agent, not just one", async () => {
+    // Three separate agent sessions (distinct ids) each publish presence.
+    const ids: string[] = [];
+    for (const name of ["uma", "victor", "wendy"]) {
+      resetIdentityForTests();
+      const a = await register(name);
+      ids.push(a.id);
+    }
+
+    const agents = await listPresence();
+    // Every one of the three must be visible — listPresence must not drop
+    // entries when several distinct ids are registered at once.
+    for (const id of ids) {
+      expect(agents.some((a) => a.id === id)).toBe(true);
+    }
   });
 });
 
@@ -212,5 +243,54 @@ describe("send_ack (direct ack envelope)", () => {
     expect(received.regarding).toBe("rc13 publish handoff");
     expect(received.status).toBe("investigating");
     expect(received.from).toBe("acker");
+  });
+});
+
+describe("self-echo filtering", () => {
+  test("check_messages drops the agent's own broadcast but keeps others, and acks the echo", async () => {
+    const room = uniqueRoom();
+    const me = await register("nadia");
+    await ensureRoomConsumer(me.id, room);
+
+    // A self-authored broadcast (from_id === me.id) — the agent's own echo.
+    await publishRoomMessage(room, newMessage("hearing myself", { room }));
+
+    // Someone else broadcasts to the same room afterward. Reset identity first
+    // so this is a genuinely different session id, not a same-session rename
+    // (register keeps the existing id when re-registering).
+    resetIdentityForTests();
+    const other = await register("mallory");
+    expect(other.id).not.toBe(me.id);
+    await publishRoomMessage(room, newMessage("from someone else", { room }));
+
+    // Only the other agent's message comes back — the self-echo is filtered.
+    const msgs = await fetchRoomMessages(me.id, room);
+    expect(msgs.map((m) => m.content)).toEqual(["from someone else"]);
+
+    // The echo was acked (not left pending): a second poll is empty rather than
+    // re-delivering the skipped message.
+    const second = await fetchRoomMessages(me.id, room);
+    expect(second).toHaveLength(0);
+  });
+
+  test("wait_for_message does NOT wake on the agent's own broadcast", async () => {
+    const room = uniqueRoom();
+    const me = await register("ned");
+    await ensureDirectConsumer(me.id);
+    await ensureRoomConsumer(me.id, room);
+
+    const start = Date.now();
+    const waiting = waitForMessages(me.id, [room], 800);
+    await sleep(250);
+    // Only the agent's own message lands during the wait — it must be ignored.
+    await publishRoomMessage(room, newMessage("just me talking", { room }));
+
+    const result = await waiting;
+    const elapsed = Date.now() - start;
+
+    expect(result.roomMessages).toHaveLength(0);
+    expect(result.directMessages).toHaveLength(0);
+    // It ran the timeout down rather than waking early on the echo.
+    expect(elapsed).toBeGreaterThanOrEqual(750);
   });
 });
