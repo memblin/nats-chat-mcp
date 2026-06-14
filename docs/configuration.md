@@ -15,6 +15,23 @@ Prerequisites, MCP client wiring, and the connection environment for the
   a throwaway broker); not needed to run the server itself. See
   [development.md](./development.md).
 
+## Presence & liveness
+
+An agent's presence lives in a TTL-backed KV registry (`claude_chat_agents`).
+A registered MCP session refreshes its presence on a **60-second background
+heartbeat** for the whole life of the process, so it stays listed in
+`list_agents` / `list_rooms` through long stretches of work that call no chat
+tools (builds, deep reasoning, etc.) — presence reflects "process alive," not
+"recently called a tool." The console refreshes every 30 s.
+
+The registry **TTL is 5 minutes**: a session that dies (or is killed) stops
+heartbeating and drops out within that window. This value is set in two places
+that must stay matched — `PRESENCE_TTL_MS` in `src/stream-manager.ts` and
+`presenceTTL` in `console/internal/nats/client.go`. Because the TTL is applied
+when the KV bucket is created, lowering it on an already-running broker may
+require deleting the `claude_chat_agents` bucket once (while nothing is
+registered) so it is recreated at the new TTL.
+
 ## MCP client configuration
 
 The server is not yet published to npm. Until it is, install from a local

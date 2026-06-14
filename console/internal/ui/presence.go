@@ -11,12 +11,12 @@ import (
 )
 
 // presenceStaleThreshold is how long since a participant's last_seen before its
-// row is dimmed as "probably gone". Healthy participants refresh well inside it
-// (console heartbeats every 30s; an agent re-syncs at the top of every
-// wait_for_message, ≤2min in a wait loop), so a dimmed row means we genuinely
-// haven't heard from it — it will be TTL-evicted entirely once it passes
-// presenceTTL.
-const presenceStaleThreshold = 2 * time.Minute
+// row is dimmed as "probably gone". It is tied to the heartbeat cadence: live
+// participants refresh on a fixed interval (the console every 30s, a registered
+// MCP agent every 60s — see src/heartbeat.ts), so 3 min is roughly three missed
+// agent heartbeats — a row only dims when an entity is genuinely lapsing toward
+// the 5-min presenceTTL, not during normal between-heartbeat gaps.
+const presenceStaleThreshold = 3 * time.Minute
 
 // dedupePresence collapses records that share a display name, keeping the one
 // with the freshest last_seen, and returns them sorted by name. A session that
