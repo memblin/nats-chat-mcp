@@ -2,7 +2,13 @@
 // exactly one agent; this module is the single source of truth for who that
 // agent is and which rooms it has joined, mirrored to the presence KV.
 import { v4 as uuidv4 } from "uuid";
-import type { AgentIdentity, AgentPresence, Message } from "./types.js";
+import type {
+  AckMessage,
+  AckStatus,
+  AgentIdentity,
+  AgentPresence,
+  Message,
+} from "./types.js";
 import { putPresence } from "./stream-manager.js";
 
 interface SessionState extends AgentIdentity {
@@ -104,6 +110,27 @@ export function newMessage(
     timestamp: new Date().toISOString(),
     reply_to: opts.reply_to,
   };
+}
+
+/**
+ * Build an acknowledgment stamped with this session's identity. It is a Message
+ * (so it travels the direct subject and decodes for existing consumers) extended
+ * with the ack envelope: `type: "ack"`, the `regarding` label, a `status`, and
+ * an optional `note`. The human-readable content mirrors those so a plain text
+ * reader still sees something sensible.
+ */
+export function newAck(
+  regarding: string,
+  status: AckStatus,
+  note?: string,
+): AckMessage {
+  const summary = note
+    ? `[ack: ${status}] ${regarding} — ${note}`
+    : `[ack: ${status}] ${regarding}`;
+  const base = newMessage(summary);
+  return note
+    ? { ...base, type: "ack", regarding, status, note }
+    : { ...base, type: "ack", regarding, status };
 }
 
 /**

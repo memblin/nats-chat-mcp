@@ -14,6 +14,7 @@ import {
   fetchRoomMessages,
   getRoomHistory,
 } from "../stream-manager.js";
+import { resetEmptyWakeups } from "../wakeups.js";
 import { jsonResult } from "./register.js";
 
 export function registerMessagingTools(server: McpServer): void {
@@ -67,6 +68,7 @@ export function registerMessagingTools(server: McpServer): void {
           );
         }
         const messages = await fetchRoomMessages(identity.id, room);
+        if (messages.length > 0) resetEmptyWakeups(identity.id);
         await syncPresence();
         return jsonResult({
           rooms_checked: [room],
@@ -91,6 +93,7 @@ export function registerMessagingTools(server: McpServer): void {
         const msgs = await fetchRoomMessages(identity.id, r);
         allMessages.push(...msgs);
       }
+      if (allMessages.length > 0) resetEmptyWakeups(identity.id);
 
       await syncPresence();
       return jsonResult({
