@@ -151,8 +151,14 @@ export async function deletePresence(agentId: string): Promise<void> {
 export async function listPresence(): Promise<AgentPresence[]> {
   const kv = await getPresenceKv();
   const out: AgentPresence[] = [];
-  const keys = await kv.keys();
-  for await (const key of keys) {
+  // Drain the key iterator FULLY before fetching any value. kv.keys() and
+  // kv.get() each open their own consumer on the bucket's stream; calling get()
+  // while still iterating keys() interleaves the two and the key scan returns
+  // only a partial set — so with several agents registered, list_agents would
+  // silently drop most of them. Materialize the keys first, then get each.
+  const keys: string[] = [];
+  for await (const key of await kv.keys()) keys.push(key);
+  for (const key of keys) {
     const entry = await kv.get(key);
     if (entry?.operation !== "PUT") continue;
     try {
@@ -268,7 +274,7 @@ export async function fetchRoomMessages(
     ROOM_STREAM,
     roomConsumerName(agentId, room),
   );
-  return drainConsumer(consumer, max);
+  return drainConsumer(consumer, max, agentId);
 }
 
 export async function fetchDirectMessages(
@@ -279,26 +285,32 @@ export async function fetchDirectMessages(
     DIRECT_STREAM,
     directConsumerName(agentId),
   );
-  return drainConsumer(consumer, max);
+  return drainConsumer(consumer, max, agentId);
 }
 
 async function drainConsumer(
   consumer: Consumer,
   max: number,
+  selfId: string,
 ): Promise<Message[]> {
   const out: Message[] = [];
   // fetch pulls up to `max` messages, waiting at most `expires` ms for any to
   // arrive before returning (so an empty room returns quickly, not hanging).
   const batch = await consumer.fetch({ max_messages: max, expires: 1000 });
   for await (const msg of batch) {
+    let parsed: Message | undefined;
     try {
-      out.push(msg.json<Message>());
+      parsed = msg.json<Message>();
     } catch {
       /* skip malformed payload */
     }
-    // ack() advances this consumer's server-side cursor past the message.
-    // Without it, the same messages would be re-delivered on the next fetch.
+    // ack() advances this consumer's server-side cursor past the message even
+    // when we drop it — without it the same messages would be re-delivered on
+    // the next fetch. We ack the agent's OWN echo too, so it never lingers.
     msg.ack();
+    // The agent's own posts echo back on its room consumer (same subject). Hand
+    // them back and the caller sees itself as fresh traffic — so filter them.
+    if (parsed && parsed.from_id !== selfId) out.push(parsed);
   }
   return out;
 }
@@ -347,13 +359,23 @@ export async function waitForMessages(
     subscriptions.push(iter);
     try {
       for await (const msg of iter) {
+        let parsed: Message | undefined;
         try {
-          bucket.push(msg.json<Message>());
+          parsed = msg.json<Message>();
         } catch {
           /* skip malformed payload */
         }
+        // Ack unconditionally so the cursor advances past anything delivered —
+        // including the agent's own echo, which we otherwise drop.
         msg.ack();
-        wake();
+        // A self-authored message is the agent hearing itself: don't surface it
+        // and, crucially, don't wake() — otherwise the agent's own send would
+        // resolve its next wait_for_message and reset the empty-wakeup streak,
+        // making a quiet room look busy.
+        if (parsed && parsed.from_id !== agentId) {
+          bucket.push(parsed);
+          wake();
+        }
       }
     } catch {
       /* iterator stopped or consumer went away — nothing left to gather */
