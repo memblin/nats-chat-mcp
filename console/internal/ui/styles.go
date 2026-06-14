@@ -88,6 +88,14 @@ var (
 
 	stylePresenceName = lipgloss.NewStyle().Foreground(colWhite)
 	stylePresenceIdle = lipgloss.NewStyle().Foreground(colDim)
+
+	// stylePresenceNameStale dims a participant whose last_seen is older than
+	// presenceStaleThreshold — still listed, but flagged as probably gone.
+	stylePresenceNameStale = lipgloss.NewStyle().Foreground(colDimmer)
+
+	// styleSectionDivider draws the rule separating the room list from the
+	// presence panel in the left column.
+	styleSectionDivider = lipgloss.NewStyle().Foreground(colDimmer)
 )
 
 // Message feed.

@@ -28,7 +28,14 @@ const PRESENCE_KV = "claude_chat_agents";
 const MESSAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const MESSAGE_MAX_PER_SUBJECT = 1000;
 const CONSUMER_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
-const PRESENCE_TTL_MS = 2 * 60 * 60 * 1000;
+// Linger window for presence: the server expires a record this long after its
+// last write, so a crashed/abandoned session clears on its own. Kept short
+// because every live participant refreshes well inside it — an agent re-syncs
+// on each tool call and at the top of every wait_for_message (≤2min in a wait
+// loop), and the console heartbeats every 30s. Must match the console's
+// presenceTTL (console/internal/nats/client.go) so either side creates an
+// identical bucket.
+const PRESENCE_TTL_MS = 15 * 60 * 1000;
 
 // After the first message wakes a blocking wait, keep gathering for this brief
 // window so a burst of messages arriving a few-score ms apart all land in the

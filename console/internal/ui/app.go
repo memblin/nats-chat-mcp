@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/list"
@@ -23,12 +24,13 @@ const historyLimit = 200
 
 // Layout geometry.
 const (
-	minLeftWidth    = 18
-	minFeedWidth    = 24
-	statusBarLines  = 1
-	helpBarLines    = 1
-	inputBarLines   = 1
-	feedHeaderLines = 2 // room title row + rule row
+	minLeftWidth     = 18
+	minFeedWidth     = 24
+	statusBarLines   = 1
+	helpBarLines     = 1
+	inputBarLines    = 1
+	feedHeaderLines  = 2 // room title row + rule row
+	leftDividerLines = 2 // blank spacer + rule between room list and presence
 )
 
 // focusZone is which region currently receives navigation keys.
@@ -278,14 +280,25 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, status, middle, help, input)
 }
 
-// renderLeftPane draws the bordered left column (room list + presence); its
-// border is accented when the rooms zone has focus.
+// renderLeftPane draws the bordered left column (room list + presence),
+// separated by a divider; its border is accented when the rooms zone has focus.
 func (m Model) renderLeftPane() string {
-	content := lipgloss.JoinVertical(lipgloss.Left, m.renderRoomList(), m.renderPresence())
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		m.renderRoomList(),
+		m.renderLeftDivider(),
+		m.renderPresence(),
+	)
 	return paneStyle(m.focus == zoneRooms).
 		Width(m.leftContentW).
 		Height(m.paneContentH).
 		Render(content)
+}
+
+// renderLeftDivider is the spacer + horizontal rule (leftDividerLines tall) that
+// separates the room list from the presence panel.
+func (m Model) renderLeftDivider() string {
+	rule := styleSectionDivider.Render(strings.Repeat("─", m.leftContentW))
+	return lipgloss.JoinVertical(lipgloss.Left, "", rule)
 }
 
 // --- helpers shared across files ---

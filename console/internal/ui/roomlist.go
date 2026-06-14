@@ -90,7 +90,7 @@ func (m Model) leftSplit() (roomLines, presenceLines int) {
 	if presenceLines < 1 {
 		presenceLines = 1
 	}
-	roomLines = m.paneContentH - presenceLines - 1 // rooms header
+	roomLines = m.paneContentH - presenceLines - 1 - leftDividerLines // rooms header + divider
 	if roomLines < 1 {
 		roomLines = 1
 	}
