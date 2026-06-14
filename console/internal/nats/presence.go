@@ -73,6 +73,44 @@ func (c *Client) DeletePresence(ctx context.Context) error {
 	return nil
 }
 
+// Evict removes a stale participant entirely: its presence record (so it drops
+// from the registry — and thus every panel and room-member list — immediately)
+// plus its delivery consumers (its direct-inbox cursor and one per room it had
+// joined). It deletes no messages. Best-effort: a consumer that is already gone
+// is not treated as an error. Refuses to evict this console's own identity.
+//
+// Evicting a participant that is actually still alive is not destructive — it
+// re-registers and recreates its consumers on its next activity.
+func (c *Client) Evict(ctx context.Context, p Presence) error {
+	if p.ID == c.id.ID {
+		return fmt.Errorf("refusing to evict self (%s)", p.ID)
+	}
+	if c.kv != nil {
+		if err := c.kv.Delete(ctx, p.ID); err != nil {
+			return fmt.Errorf("evict %s: delete presence: %w", p.ID, err)
+		}
+	}
+	if err := c.deleteConsumer(ctx, StreamDirect, directConsumerName(p.ID)); err != nil {
+		return err
+	}
+	for _, room := range p.Rooms {
+		if err := c.deleteConsumer(ctx, StreamRooms, roomConsumerName(p.ID, room)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteConsumer removes a durable consumer, treating an already-absent one as
+// success so eviction is idempotent.
+func (c *Client) deleteConsumer(ctx context.Context, stream, name string) error {
+	if err := c.js.DeleteConsumer(ctx, stream, name); err != nil &&
+		!errors.Is(err, jetstream.ErrConsumerNotFound) {
+		return fmt.Errorf("evict: delete consumer %s: %w", name, err)
+	}
+	return nil
+}
+
 // ListPresence reads every live presence record from the registry, sorted by
 // name for a stable panel ordering.
 func (c *Client) ListPresence(ctx context.Context) ([]Presence, error) {

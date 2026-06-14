@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -57,6 +58,22 @@ type historyLoadedMsg struct {
 	msgs []natsclient.Message
 }
 
+// evictedMsg reports the result of an eviction: how many participants were
+// removed and, when the follow-up registry read succeeded, the fresh snapshot.
+type evictedMsg struct {
+	count     int
+	agents    []natsclient.Presence
+	refreshed bool
+}
+
+// confirmState backs the eviction confirmation modal. scope is the active room
+// the cleanup targets, or "" for the bulk "everywhere" action; targets are the
+// stale participants that will be evicted on confirm.
+type confirmState struct {
+	scope   string
+	targets []natsclient.Presence
+}
+
 // Model is the entire console state. Per the project constraint, nothing lives
 // in package globals — all mutable state is here.
 type Model struct {
@@ -88,6 +105,9 @@ type Model struct {
 	newestBottom bool
 	searching    bool
 	searchQuery  string
+
+	// confirm is non-nil while an eviction confirmation modal is open.
+	confirm *confirmState
 
 	now time.Time
 }
@@ -167,6 +187,22 @@ func (m Model) sendCmd(room, content string) tea.Cmd {
 	}
 }
 
+// evictCmd removes each target participant off the event loop, then re-reads the
+// registry so the panel reflects the removals without waiting for the next poll.
+func (m Model) evictCmd(targets []natsclient.Presence) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		count := 0
+		for _, p := range targets {
+			if err := client.Evict(context.Background(), p); err == nil {
+				count++
+			}
+		}
+		agents, err := client.ListPresence(context.Background())
+		return evictedMsg{count: count, agents: agents, refreshed: err == nil}
+	}
+}
+
 // Update is the central event handler.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -199,6 +235,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loaded[msg.room] = true
 		if m.activeName() == msg.room {
 			m.refreshViewport()
+		}
+		return m, nil
+
+	case evictedMsg:
+		if msg.refreshed {
+			m.presence = msg.agents
 		}
 		return m, nil
 	}
@@ -275,9 +317,56 @@ func (m Model) View() string {
 	}
 	status := m.renderStatusBar()
 	middle := lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(), m.renderFeedPane())
+	if m.confirm != nil {
+		// A modal owns the middle region while a destructive action awaits y/N.
+		middle = m.renderConfirmModal()
+	}
 	help := m.renderHelp()
 	input := m.renderInput()
 	return lipgloss.JoinVertical(lipgloss.Left, status, middle, help, input)
+}
+
+// renderConfirmModal draws the eviction confirmation as a centered box filling
+// the middle region (so the overall layout height is unchanged).
+func (m Model) renderConfirmModal() string {
+	c := m.confirm
+	scope := "everywhere"
+	if c.scope != "" {
+		scope = "\"" + c.scope + "\""
+	}
+
+	var b strings.Builder
+	if len(c.targets) == 0 {
+		b.WriteString(styleModalTitle.Render("No stale participants"))
+		b.WriteString("\n\n")
+		fmt.Fprintf(&b, "Nothing to evict %s.", scope)
+		b.WriteString("\n\n")
+		b.WriteString(styleModalDim.Render("any key  close"))
+	} else {
+		b.WriteString(styleModalTitle.Render(
+			fmt.Sprintf("Evict %d stale participant(s) %s", len(c.targets), scope)))
+		b.WriteString("\n\n")
+		const maxShown = 8
+		for i, p := range c.targets {
+			if i >= maxShown {
+				fmt.Fprintf(&b, "  … and %d more\n", len(c.targets)-maxShown)
+				break
+			}
+			idle := natsclient.FormatIdle(m.now.Sub(p.LastSeenTime()))
+			fmt.Fprintf(&b, "  • %-16s idle %s\n", truncate(p.Name, 16), idle)
+		}
+		b.WriteString("\n")
+		b.WriteString(styleModalDim.Render(
+			"Removes their presence record and delivery consumers.\n" +
+				"No messages are deleted. A still-live agent re-registers\n" +
+				"on its next activity."))
+		b.WriteString("\n\n")
+		b.WriteString(styleModalKey.Render("y") + styleModalDim.Render("  evict") +
+			"      " + styleModalKey.Render("any key") + styleModalDim.Render("  cancel"))
+	}
+
+	box := styleModalBox.Render(b.String())
+	return lipgloss.Place(m.width, m.midH, lipgloss.Center, lipgloss.Center, box)
 }
 
 // renderLeftPane draws the bordered left column (room list + presence),

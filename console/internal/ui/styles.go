@@ -131,6 +131,19 @@ var (
 	styleHelpSep = lipgloss.NewStyle().Foreground(colDimmer)
 )
 
+// Confirmation modal (e.g. evict-stale): a yellow-bordered box that replaces
+// the panes while a destructive action awaits y/N.
+var (
+	styleModalBox = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colYellow).
+			Padding(0, 2)
+
+	styleModalTitle = lipgloss.NewStyle().Foreground(colYellow).Bold(true)
+	styleModalDim   = lipgloss.NewStyle().Foreground(colDim)
+	styleModalKey   = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
+)
+
 // Input bar.
 var (
 	styleSearchLabel = lipgloss.NewStyle().Foreground(colYellow).Bold(true)

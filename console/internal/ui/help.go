@@ -23,6 +23,9 @@ func (m Model) renderHelp() string {
 
 // helpFor returns the zone label and key hints for the current mode/focus.
 func (m Model) helpFor() (string, []hint) {
+	if m.confirm != nil {
+		return "CONFIRM", []hint{{"y", "evict"}, {"any key", "cancel"}}
+	}
 	if m.searching {
 		return "SEARCH", []hint{{"type", "filter"}, {"Enter", "apply"}, {"Esc", "cancel"}}
 	}
@@ -35,7 +38,7 @@ func (m Model) helpFor() (string, []hint) {
 	case zoneRooms:
 		return "ROOMS", []hint{
 			{"↑/↓", "select"}, {"Enter", "open"}, {"^]/^[", "switch room"},
-			{"Tab", "next pane"}, {"q", "quit"},
+			{"x/X", "evict stale"}, {"Tab", "next pane"}, {"q", "quit"},
 		}
 	default: // zoneCompose
 		return "COMPOSE", []hint{

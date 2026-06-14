@@ -39,6 +39,40 @@ func dedupePresence(in []natsclient.Presence) []natsclient.Presence {
 	return out
 }
 
+// staleParticipants returns the presence records eligible for eviction: those
+// whose last_seen is older than presenceStaleThreshold (the dimmed rows),
+// excluding this console's own identity. When room is non-empty only
+// participants in that room are returned; otherwise every stale participant
+// across all rooms. It works over the RAW slice (not the deduped view) so every
+// ghost id hiding behind a shared display name is caught. Sorted by name.
+func staleParticipants(ps []natsclient.Presence, now time.Time, room, selfID string) []natsclient.Presence {
+	out := make([]natsclient.Presence, 0)
+	for _, p := range ps {
+		if p.ID == selfID {
+			continue
+		}
+		if now.Sub(p.LastSeenTime()) <= presenceStaleThreshold {
+			continue
+		}
+		if room != "" && !contains(p.Rooms, room) {
+			continue
+		}
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// contains reports whether room is present in rooms.
+func contains(rooms []string, room string) bool {
+	for _, r := range rooms {
+		if r == room {
+			return true
+		}
+	}
+	return false
+}
+
 // presenceRows returns the agents to show in the panel: those present in the
 // active room, or everyone when no room is active. Same-name duplicates are
 // collapsed to their freshest record.
