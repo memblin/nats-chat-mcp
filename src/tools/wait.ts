@@ -8,7 +8,12 @@ import {
   syncPresence,
 } from "../identity.js";
 import { waitForMessages } from "../stream-manager.js";
-import { recordWaitResult } from "../wakeups.js";
+import {
+  coalesceWait,
+  decideWaitCooldown,
+  recordWaitResult,
+  recordWaitReturn,
+} from "../wakeups.js";
 import { jsonResult } from "./register.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -41,35 +46,61 @@ export function registerWaitTools(server: McpServer): void {
       }
 
       const identity = getIdentity();
+
+      // Per-identity cooldown gate, checked before any work. Within the window:
+      // an empty previous return is replayed (idempotent — nothing was
+      // consumed), and a messages-bearing one is rejected with guidance. This
+      // is what stops a single turn from stacking wait_for_message calls.
+      const decision = decideWaitCooldown(identity.id);
+      if (decision.action === "replay" || decision.action === "reject") {
+        return jsonResult(decision.payload);
+      }
+
       const rooms = getRooms();
       const timeout = timeout_ms ?? DEFAULT_TIMEOUT_MS;
 
-      // Keep presence fresh up front; the session's background heartbeat keeps
-      // it alive for the rest of a long block (see heartbeat.ts).
-      await syncPresence();
+      // Single-flight: if a wait is already blocking for this identity (a burst
+      // of calls fired in one turn before the first returned), attach to it
+      // rather than opening a second consumer on the same durable. Only the
+      // leader records streak/return state; followers mirror its result so one
+      // wait is never counted many times. The first caller's timeout governs.
+      const { leader, result } = await coalesceWait(identity.id, async () => {
+        // Keep presence fresh up front; the session's background heartbeat
+        // keeps it alive for the rest of a long block (see heartbeat.ts).
+        await syncPresence();
 
-      const start = Date.now();
-      const { roomMessages, directMessages } = await waitForMessages(
-        identity.id,
-        rooms,
-        timeout,
-      );
-      const elapsed_ms = Date.now() - start;
+        const start = Date.now();
+        const { roomMessages, directMessages } = await waitForMessages(
+          identity.id,
+          rooms,
+          timeout,
+        );
+        const elapsed_ms = Date.now() - start;
 
-      const timed_out =
-        roomMessages.length === 0 && directMessages.length === 0;
-      const consecutive_empty_wakeups = recordWaitResult(
-        identity.id,
-        timed_out,
-      );
+        const timed_out =
+          roomMessages.length === 0 && directMessages.length === 0;
+        const consecutive_empty_wakeups = recordWaitResult(
+          identity.id,
+          timed_out,
+        );
 
-      return jsonResult({
-        timed_out,
-        elapsed_ms,
-        consecutive_empty_wakeups,
-        room_messages: roomMessages,
-        direct_messages: directMessages,
+        const payload = {
+          timed_out,
+          elapsed_ms,
+          consecutive_empty_wakeups,
+          room_messages: roomMessages,
+          direct_messages: directMessages,
+        };
+
+        // Stamp + cache the return so the cooldown is measured from this moment
+        // and an empty result can be replayed within the window.
+        recordWaitReturn(identity.id, payload);
+        return payload;
       });
+
+      // Mark a coalesced follower's copy so it's observable in logs; the leader
+      // returns the result verbatim.
+      return jsonResult(leader ? result : { ...result, coalesced: true });
     },
   );
 }
