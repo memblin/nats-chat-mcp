@@ -54,6 +54,11 @@ func filterMessages(msgs []natsclient.Message, query string) []natsclient.Messag
 // sized to width: a fixed sender column, a dimmed HH:MM timestamp, and a wrapped
 // body whose continuation lines align under the first. selfID highlights the
 // operator's own messages.
+//
+// Consecutive messages from the same sender are grouped: the sender name prints
+// once at the top of the group, following messages blank that column (keeping
+// their own timestamp + body), and a blank line separates one sender's group
+// from the next — so it's easy to see where one post ends and another begins.
 func renderFeed(msgs []natsclient.Message, width int, selfID string) string {
 	if width <= 0 {
 		return ""
@@ -65,19 +70,31 @@ func renderFeed(msgs []natsclient.Message, width int, selfID string) string {
 	}
 
 	var b strings.Builder
-	for _, m := range msgs {
-		sender := truncate(m.From, senderColWidth)
-		senderStyle := styleSender
-		if m.FromID == selfID {
-			senderStyle = styleSenderSelf
+	prevKey := ""
+	for i, m := range msgs {
+		key := senderKey(m)
+		grouped := i > 0 && key == prevKey
+		if i > 0 && !grouped {
+			b.WriteString("\n") // blank line between sender groups
 		}
-		ts := m.Time().Format("15:04")
 
+		// First message of a group shows the (styled) sender name; a grouped
+		// message blanks the same-width column so timestamps stay aligned.
+		senderCell := strings.Repeat(" ", senderColWidth)
+		if !grouped {
+			senderStyle := styleSender
+			if m.FromID == selfID {
+				senderStyle = styleSenderSelf
+			}
+			senderCell = senderStyle.Render(truncate(m.From, senderColWidth))
+		}
+
+		ts := m.Time().Format("15:04")
 		lines := wrap(m.Content, bodyWidth)
 		if len(lines) == 0 {
 			lines = []string{""}
 		}
-		b.WriteString(senderStyle.Render(sender))
+		b.WriteString(senderCell)
 		b.WriteString(" ")
 		b.WriteString(styleTimestamp.Render(ts))
 		b.WriteString(" ")
@@ -88,8 +105,18 @@ func renderFeed(msgs []natsclient.Message, width int, selfID string) string {
 			b.WriteString(styleBody.Render(cont))
 			b.WriteString("\n")
 		}
+		prevKey = key
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// senderKey identifies a message's sender for grouping: the stable FromID when
+// present, otherwise the display name.
+func senderKey(m natsclient.Message) string {
+	if m.FromID != "" {
+		return m.FromID
+	}
+	return m.From
 }
 
 // truncate shortens s to at most n runes, trailing the cut with "…".

@@ -106,6 +106,11 @@ type Model struct {
 	searching    bool
 	searchQuery  string
 
+	// mouseOn tracks whether mouse reporting is active. Turning it off (key "m")
+	// hands mouse events back to the terminal so the operator can drag-select and
+	// copy text from the feed; turning it on restores wheel-scroll and click.
+	mouseOn bool
+
 	// confirm is non-nil while an eviction confirmation modal is open.
 	confirm *confirmState
 
@@ -141,8 +146,20 @@ func New(cfg config.Config, client *natsclient.Client) Model {
 		input:        ti,
 		focus:        zoneCompose,
 		newestBottom: true,
+		mouseOn:      true, // the program starts with WithMouseCellMotion
 		now:          time.Now(),
 	}
+}
+
+// toggleMouse flips mouse reporting and returns the command that applies it:
+// disabling it lets the terminal handle selection/copy, enabling it restores
+// wheel-scroll and click-to-focus.
+func (m *Model) toggleMouse() tea.Cmd {
+	m.mouseOn = !m.mouseOn
+	if m.mouseOn {
+		return tea.EnableMouseCellMotion
+	}
+	return tea.DisableMouse
 }
 
 // Init starts the periodic tick and the input cursor blink.

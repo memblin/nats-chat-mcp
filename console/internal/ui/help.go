@@ -33,12 +33,12 @@ func (m Model) helpFor() (string, []hint) {
 	case zoneFeed:
 		return "FEED", []hint{
 			{"j/k", "scroll"}, {"/", "search"}, {"s", "sort"},
-			{"g/G", "top/bottom"}, {"Tab", "next pane"}, {"q", "quit"},
+			{"g/G", "top/bottom"}, {"m", m.mouseHint()}, {"Tab", "next pane"}, {"q", "quit"},
 		}
 	case zoneRooms:
 		return "ROOMS", []hint{
 			{"↑/↓", "select"}, {"Enter", "open"}, {"^]/^[", "switch room"},
-			{"x/X", "evict stale"}, {"Tab", "next pane"}, {"q", "quit"},
+			{"x/X", "evict stale"}, {"m", m.mouseHint()}, {"Tab", "next pane"}, {"q", "quit"},
 		}
 	default: // zoneCompose
 		return "COMPOSE", []hint{
@@ -46,4 +46,13 @@ func (m Model) helpFor() (string, []hint) {
 			{"mouse", "click panes"}, {"^C", "quit"},
 		}
 	}
+}
+
+// mouseHint is the description for the "m" key: it names the current mouse state
+// so the operator can tell at a glance whether copy/paste selection is available.
+func (m Model) mouseHint() string {
+	if m.mouseOn {
+		return "mouse on"
+	}
+	return "mouse off"
 }

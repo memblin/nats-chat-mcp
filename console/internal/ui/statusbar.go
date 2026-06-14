@@ -25,6 +25,9 @@ func (m Model) renderStatusBar() string {
 	conn := m.connSegment()
 
 	left := lipgloss.JoinHorizontal(lipgloss.Top, app, sep(), ident, sep(), roomSeg)
+	if !m.mouseOn {
+		left = lipgloss.JoinHorizontal(lipgloss.Top, left, sep(), styleStatusMouseOff.Render("MOUSE OFF"))
+	}
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(conn)
 	if gap < 1 {
 		gap = 1
