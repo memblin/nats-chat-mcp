@@ -111,8 +111,8 @@ func TestStaleParticipantsBulkEverywhere(t *testing.T) {
 
 func TestStaleParticipantsThresholdBoundary(t *testing.T) {
 	ps := []natsclient.Presence{
-		presID("u", "Under", ago(119*time.Second)), // <= 2m: not stale
-		presID("o", "Over", ago(121*time.Second)),  // >  2m: stale
+		presID("u", "Under", ago(170*time.Second)), // <= 3m: not stale
+		presID("o", "Over", ago(190*time.Second)),  // >  3m: stale
 	}
 	got := staleParticipants(ps, staleNow, "", "")
 	if !eq(names(got), []string{"Over"}) {

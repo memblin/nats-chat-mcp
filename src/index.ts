@@ -5,6 +5,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { connectNats, closeNats, NATS_URL } from "./nats-client.js";
 import { ensureInfrastructure } from "./stream-manager.js";
+import { startPresenceHeartbeat } from "./heartbeat.js";
 import { registerAllTools } from "./tools/register.js";
 
 async function main(): Promise<void> {
@@ -29,7 +30,12 @@ async function main(): Promise<void> {
   await server.connect(transport);
   console.error(`[nats-chat] connected to ${NATS_URL}, serving on stdio`);
 
+  // Keep this session's presence fresh for as long as the process lives, even
+  // through long stretches of work that call no chat tools.
+  const stopHeartbeat = startPresenceHeartbeat();
+
   const shutdown = async () => {
+    stopHeartbeat();
     await closeNats();
     process.exit(0);
   };
