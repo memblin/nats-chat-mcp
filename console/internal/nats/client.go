@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -317,6 +318,87 @@ func (c *Client) History(ctx context.Context, room string, limit int) ([]Message
 		out = out[len(out)-limit:]
 	}
 	return out, nil
+}
+
+// ---------------------------------------------------------------------------
+// Direct-thread purge — delete the messages of one DM conversation outright.
+// ---------------------------------------------------------------------------
+
+// PurgeDirectThread deletes, in both directions, the direct messages exchanged
+// between this console's identity and peerID: the peer's messages sitting in our
+// inbox subject, and our own messages sitting in the peer's inbox subject. It
+// returns the number of messages deleted.
+//
+// Direct subjects are per-recipient — chat.direct.<id>.msg carries DMs from every
+// sender — so a single thread cannot be purged by subject filter alone; each
+// matching message is removed individually by its stream sequence. Acking only
+// advances a delivery cursor, so messages remain in the LimitsPolicy stream until
+// they age out and are still deletable here. The shared direct_<id> delivery
+// consumer is deliberately left untouched: it serves every DM thread, not just
+// this one.
+func (c *Client) PurgeDirectThread(ctx context.Context, peerID string) (int, error) {
+	inbound, err := c.directSeqsFrom(ctx, DirectSubject(c.id.ID), peerID)
+	if err != nil {
+		return 0, err
+	}
+	outbound, err := c.directSeqsFrom(ctx, DirectSubject(peerID), c.id.ID)
+	if err != nil {
+		return 0, err
+	}
+
+	stream, err := c.js.Stream(ctx, StreamDirect)
+	if err != nil {
+		return 0, fmt.Errorf("purge direct: open stream: %w", err)
+	}
+
+	deleted := 0
+	for _, seq := range append(inbound, outbound...) {
+		if err := stream.DeleteMsg(ctx, seq); err != nil {
+			if errors.Is(err, jetstream.ErrMsgNotFound) {
+				continue // already gone — purge is idempotent
+			}
+			return deleted, fmt.Errorf("purge direct: delete seq %d: %w", seq, err)
+		}
+		deleted++
+	}
+	return deleted, nil
+}
+
+// directSeqsFrom scans one direct subject and returns the stream sequences of the
+// messages whose sender is fromID, using an ephemeral ordered consumer with a
+// bounded fetch — the same read pattern as History.
+func (c *Client) directSeqsFrom(ctx context.Context, subject, fromID string) ([]uint64, error) {
+	cons, err := c.js.OrderedConsumer(ctx, StreamDirect, jetstream.OrderedConsumerConfig{
+		FilterSubjects: []string{subject},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("purge direct: consumer for %s: %w", subject, err)
+	}
+
+	batch, err := cons.Fetch(messageMaxMsgPerSubj, jetstream.FetchMaxWait(1500*time.Millisecond))
+	if err != nil {
+		return nil, fmt.Errorf("purge direct: fetch for %s: %w", subject, err)
+	}
+
+	var seqs []uint64
+	for m := range batch.Messages() {
+		msg, perr := ParseMessage(m.Data())
+		if perr != nil {
+			continue // skip malformed payload, like the drain loop
+		}
+		if msg.FromID != fromID {
+			continue
+		}
+		md, merr := m.Metadata()
+		if merr != nil {
+			continue // no stream sequence to delete by
+		}
+		seqs = append(seqs, md.Sequence.Stream)
+	}
+	if err := batch.Error(); err != nil {
+		return nil, fmt.Errorf("purge direct: stream for %s: %w", subject, err)
+	}
+	return seqs, nil
 }
 
 // ---------------------------------------------------------------------------

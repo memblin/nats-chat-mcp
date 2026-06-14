@@ -123,6 +123,13 @@ var (
 	styleTimestamp = lipgloss.NewStyle().Foreground(colDimmer)
 
 	styleBody = lipgloss.NewStyle().Foreground(colWhite)
+
+	// Inline markdown spans within a message body: `code`, **bold**, *italic*.
+	// Code gets a subtle chip (yellow on the status background); bold and italic
+	// keep the body color and lean on the terminal's weight/slant.
+	styleCode   = lipgloss.NewStyle().Foreground(colYellow).Background(colBg)
+	styleBold   = lipgloss.NewStyle().Foreground(colWhite).Bold(true)
+	styleItalic = lipgloss.NewStyle().Foreground(colWhite).Italic(true)
 )
 
 // Help bar (bottom): the focused zone name plus context-sensitive key hints.

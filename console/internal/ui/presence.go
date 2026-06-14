@@ -77,10 +77,11 @@ func contains(rooms []string, room string) bool {
 // active room, or everyone when no room is active. Same-name duplicates are
 // collapsed to their freshest record.
 func (m Model) presenceRows() []natsclient.Presence {
-	room := m.activeName()
-	if room == "" || room == directBucket {
+	e := m.activeEntry()
+	if e == nil || e.isDM {
 		return dedupePresence(m.presence)
 	}
+	room := e.name
 	out := make([]natsclient.Presence, 0, len(m.presence))
 	for _, p := range m.presence {
 		for _, r := range p.Rooms {
@@ -96,7 +97,7 @@ func (m Model) presenceRows() []natsclient.Presence {
 // renderPresence draws the PRESENCE section: each agent's name with its idle
 // time (now minus last-seen) right-aligned.
 func (m Model) renderPresence() string {
-	_, presenceLines := m.leftSplit()
+	_, _, presenceLines := m.leftSplit()
 	header := styleSectionHeader.Render("PRESENCE")
 
 	rows := m.presenceRows()

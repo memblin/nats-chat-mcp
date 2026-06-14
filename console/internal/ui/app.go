@@ -16,9 +16,13 @@ import (
 	natsclient "github.com/memblin/nats-chat-mcp/console/internal/nats"
 )
 
-// directBucket is the reserved room-list key under which direct messages are
-// collected. It is a UI bucket only — never published as a NATS room subject.
-const directBucket = "direct"
+// dmKeyPrefix namespaces a DM thread's feeds-map key (and roomEntry.name) by the
+// peer's identity id, so a thread can never collide with a room name. DM threads
+// are UI-only buckets; they are never published as a NATS subject.
+const dmKeyPrefix = "dm:"
+
+// dmKey is the feeds-map key and roomEntry.name for the DM thread with peerID.
+func dmKey(peerID string) string { return dmKeyPrefix + peerID }
 
 // historyLimit is how many retained messages a room loads on first activation.
 const historyLimit = 200
@@ -43,10 +47,15 @@ const (
 	zoneCompose
 )
 
-// roomEntry is a row in the room list: its name and unread count.
+// roomEntry is a row in the left pane. For a room, name is the room name and
+// label mirrors it. For a DM thread (isDM), name is dmKey(peerID), label is the
+// peer's display name, and peerID is the peer agent's identity id.
 type roomEntry struct {
 	name   string
+	label  string
 	unread int
+	isDM   bool
+	peerID string
 }
 
 // --- async messages fed back into Update ---
@@ -66,12 +75,47 @@ type evictedMsg struct {
 	refreshed bool
 }
 
-// confirmState backs the eviction confirmation modal. scope is the active room
-// the cleanup targets, or "" for the bulk "everywhere" action; targets are the
-// stale participants that will be evicted on confirm.
+// dmSentMsg carries a DM the console just published back to the event loop so the
+// thread can show a local echo — our own DM lands on the peer's inbox subject, so
+// our direct consumer never delivers it back to us.
+type dmSentMsg struct {
+	bucket string
+	msg    natsclient.Message
+}
+
+// dmClosedMsg signals that a DM thread's NATS messages have been purged, so the
+// thread can be dropped from the UI.
+type dmClosedMsg struct {
+	bucket string
+}
+
+// confirmKind selects which destructive action a confirmState describes.
+type confirmKind int
+
+const (
+	confirmEvict confirmKind = iota
+	confirmCloseDM
+)
+
+// confirmState backs a destructive-action confirmation modal. For confirmEvict,
+// scope is the active room the cleanup targets (or "" for the bulk "everywhere"
+// action) and targets are the stale participants. For confirmCloseDM,
+// peerID/peerName identify the thread and msgCount is how many of its messages
+// are buffered locally.
 type confirmState struct {
-	scope   string
-	targets []natsclient.Presence
+	kind     confirmKind
+	scope    string
+	targets  []natsclient.Presence
+	peerID   string
+	peerName string
+	msgCount int
+}
+
+// pickerState backs the "new DM" picker modal: the live agents to choose from
+// and the highlighted index.
+type pickerState struct {
+	agents []natsclient.Presence
+	idx    int
 }
 
 // Model is the entire console state. Per the project constraint, nothing lives
@@ -98,6 +142,7 @@ type Model struct {
 	presence []natsclient.Presence
 
 	roomList list.Model
+	dmList   list.Model
 	viewport viewport.Model
 	input    textinput.Model
 
@@ -111,8 +156,11 @@ type Model struct {
 	// copy text from the feed; turning it on restores wheel-scroll and click.
 	mouseOn bool
 
-	// confirm is non-nil while an eviction confirmation modal is open.
+	// confirm is non-nil while a destructive-action confirmation modal is open.
 	confirm *confirmState
+
+	// picker is non-nil while the "new DM" agent picker modal is open.
+	picker *pickerState
 
 	now time.Time
 }
@@ -125,14 +173,6 @@ func New(cfg config.Config, client *natsclient.Client) Model {
 	ti.Placeholder = "type a message…"
 	ti.Focus()
 
-	rl := list.New(nil, roomDelegate{}, 0, 0)
-	rl.SetShowTitle(false)
-	rl.SetShowStatusBar(false)
-	rl.SetShowHelp(false)
-	rl.SetShowPagination(false)
-	rl.SetFilteringEnabled(false)
-	rl.DisableQuitKeybindings()
-
 	return Model{
 		cfg:          cfg,
 		client:       client,
@@ -141,7 +181,8 @@ func New(cfg config.Config, client *natsclient.Client) Model {
 		active:       -1,
 		feeds:        make(map[string][]natsclient.Message),
 		loaded:       make(map[string]bool),
-		roomList:     rl,
+		roomList:     newEntryList(),
+		dmList:       newEntryList(),
 		viewport:     viewport.New(0, 0),
 		input:        ti,
 		focus:        zoneCompose,
@@ -149,6 +190,19 @@ func New(cfg config.Config, client *natsclient.Client) Model {
 		mouseOn:      true, // the program starts with WithMouseCellMotion
 		now:          time.Now(),
 	}
+}
+
+// newEntryList builds a bubbles list configured for the left-pane sections (room
+// list and DM list): no chrome, no filtering, no quit keybindings.
+func newEntryList() list.Model {
+	l := list.New(nil, roomDelegate{}, 0, 0)
+	l.SetShowTitle(false)
+	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
+	l.SetShowPagination(false)
+	l.SetFilteringEnabled(false)
+	l.DisableQuitKeybindings()
+	return l
 }
 
 // toggleMouse flips mouse reporting and returns the command that applies it:
@@ -220,6 +274,30 @@ func (m Model) evictCmd(targets []natsclient.Presence) tea.Cmd {
 	}
 }
 
+// sendDMCmd publishes a direct message to peerID and feeds the sent message back
+// as a dmSentMsg so the thread shows a local echo: our DM lands on the peer's
+// inbox subject, so our own direct consumer never delivers it back to us.
+func (m Model) sendDMCmd(peerID, content string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		msg, err := client.SendDirect(context.Background(), peerID, content, "")
+		if err != nil {
+			return nil
+		}
+		return dmSentMsg{bucket: dmKey(peerID), msg: msg}
+	}
+}
+
+// purgeDMCmd deletes the DM thread's messages from NATS (both directions) off the
+// event loop, then reports completion so the thread is removed from the UI.
+func (m Model) purgeDMCmd(peerID string) tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		_, _ = client.PurgeDirectThread(context.Background(), peerID)
+		return dmClosedMsg{bucket: dmKey(peerID)}
+	}
+}
+
 // Update is the central event handler.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -260,6 +338,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.presence = msg.agents
 		}
 		return m, nil
+
+	case dmSentMsg:
+		m.feeds[msg.bucket] = append(m.feeds[msg.bucket], msg.msg)
+		if msg.bucket == m.activeName() {
+			m.refreshViewport()
+		}
+		return m, nil
+
+	case dmClosedMsg:
+		m.removeEntry(msg.bucket)
+		return m, nil
 	}
 	return m, nil
 }
@@ -271,6 +360,7 @@ func (m Model) onResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.ready = true
 
 	m.roomList.SetSize(m.leftContentW, m.roomListHeight())
+	m.dmList.SetSize(m.leftContentW, m.dmListHeight())
 	m.viewport.Width = m.feedContentW
 	m.viewport.Height = m.paneContentH - feedHeaderLines
 	if m.viewport.Height < 1 {
@@ -334,18 +424,24 @@ func (m Model) View() string {
 	}
 	status := m.renderStatusBar()
 	middle := lipgloss.JoinHorizontal(lipgloss.Top, m.renderLeftPane(), m.renderFeedPane())
-	if m.confirm != nil {
+	switch {
+	case m.confirm != nil:
 		// A modal owns the middle region while a destructive action awaits y/N.
 		middle = m.renderConfirmModal()
+	case m.picker != nil:
+		middle = m.renderPickerModal()
 	}
 	help := m.renderHelp()
 	input := m.renderInput()
 	return lipgloss.JoinVertical(lipgloss.Left, status, middle, help, input)
 }
 
-// renderConfirmModal draws the eviction confirmation as a centered box filling
-// the middle region (so the overall layout height is unchanged).
+// renderConfirmModal draws the active confirmation as a centered box filling the
+// middle region (so the overall layout height is unchanged).
 func (m Model) renderConfirmModal() string {
+	if m.confirm.kind == confirmCloseDM {
+		return m.renderCloseDMModal()
+	}
 	c := m.confirm
 	scope := "everywhere"
 	if c.scope != "" {
@@ -386,14 +482,74 @@ func (m Model) renderConfirmModal() string {
 	return lipgloss.Place(m.width, m.midH, lipgloss.Center, lipgloss.Center, box)
 }
 
+// renderCloseDMModal draws the close-DM confirmation: it names the peer and warns
+// that the thread's messages are deleted from NATS in both directions.
+func (m Model) renderCloseDMModal() string {
+	c := m.confirm
+	var b strings.Builder
+	b.WriteString(styleModalTitle.Render("Close DM with " + truncate(c.peerName, 24)))
+	b.WriteString("\n\n")
+	fmt.Fprintf(&b, "%d message(s) buffered in this thread.", c.msgCount)
+	b.WriteString("\n\n")
+	b.WriteString(styleModalDim.Render(
+		"Deletes the thread's messages from NATS in both\n" +
+			"directions — your inbox and the peer's. This cannot\n" +
+			"be undone. Other DM threads are untouched."))
+	b.WriteString("\n\n")
+	b.WriteString(styleModalKey.Render("y") + styleModalDim.Render("  close & delete") +
+		"      " + styleModalKey.Render("any key") + styleModalDim.Render("  cancel"))
+
+	box := styleModalBox.Render(b.String())
+	return lipgloss.Place(m.width, m.midH, lipgloss.Center, lipgloss.Center, box)
+}
+
+// renderPickerModal draws the "new DM" agent picker: the live participants with
+// the highlighted row marked, navigated with j/k and chosen with Enter.
+func (m Model) renderPickerModal() string {
+	p := m.picker
+	var b strings.Builder
+	if len(p.agents) == 0 {
+		b.WriteString(styleModalTitle.Render("New direct message"))
+		b.WriteString("\n\n")
+		b.WriteString("Nobody else is present to message.")
+		b.WriteString("\n\n")
+		b.WriteString(styleModalDim.Render("any key  close"))
+	} else {
+		b.WriteString(styleModalTitle.Render("New direct message"))
+		b.WriteString("\n\n")
+		const maxShown = 10
+		for i, a := range p.agents {
+			if i >= maxShown {
+				fmt.Fprintf(&b, "  … and %d more\n", len(p.agents)-maxShown)
+				break
+			}
+			marker := "  "
+			nameStyle := styleModalDim
+			if i == p.idx {
+				marker = "▶ "
+				nameStyle = styleModalKey
+			}
+			b.WriteString(marker + nameStyle.Render(truncate(a.Name, 24)) + "\n")
+		}
+		b.WriteString("\n")
+		b.WriteString(styleModalKey.Render("↑/↓") + styleModalDim.Render("  select") +
+			"   " + styleModalKey.Render("Enter") + styleModalDim.Render("  open") +
+			"   " + styleModalKey.Render("Esc") + styleModalDim.Render("  cancel"))
+	}
+
+	box := styleModalBox.Render(b.String())
+	return lipgloss.Place(m.width, m.midH, lipgloss.Center, lipgloss.Center, box)
+}
+
 // renderLeftPane draws the bordered left column (room list + presence),
 // separated by a divider; its border is accented when the rooms zone has focus.
 func (m Model) renderLeftPane() string {
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		m.renderRoomList(),
-		m.renderLeftDivider(),
-		m.renderPresence(),
-	)
+	sections := []string{m.renderRoomList()}
+	if m.dmCount() > 0 {
+		sections = append(sections, m.renderDMList())
+	}
+	sections = append(sections, m.renderLeftDivider(), m.renderPresence())
+	content := lipgloss.JoinVertical(lipgloss.Left, sections...)
 	return paneStyle(m.focus == zoneRooms).
 		Width(m.leftContentW).
 		Height(m.paneContentH).
@@ -427,18 +583,69 @@ func (m Model) roomIndex(name string) int {
 	return -1
 }
 
-// ensureRoom adds a room to the list if absent, returning a subscribe command
-// for real (non-direct) rooms so unread counting works before activation.
+// activeEntry returns a pointer to the active entry, or nil when none is selected.
+func (m *Model) activeEntry() *roomEntry {
+	if m.active < 0 || m.active >= len(m.rooms) {
+		return nil
+	}
+	return &m.rooms[m.active]
+}
+
+// ensureRoom adds a room to the list if absent, returning a subscribe command so
+// unread counting works before activation.
 func (m *Model) ensureRoom(name string) tea.Cmd {
 	if m.roomIndex(name) >= 0 {
 		return nil
 	}
-	m.rooms = append(m.rooms, roomEntry{name: name})
+	m.rooms = append(m.rooms, roomEntry{name: name, label: name})
 	m.syncRoomItems()
-	if name == directBucket {
-		return nil
-	}
 	return m.subscribeCmd(name)
+}
+
+// ensureDM adds (or refreshes) the DM thread for a peer. It returns no command:
+// the single direct-inbox consumer already covers every DM thread, so a thread
+// needs no per-room subscription.
+func (m *Model) ensureDM(peerID, peerName string) {
+	key := dmKey(peerID)
+	if i := m.roomIndex(key); i >= 0 {
+		if peerName != "" && m.rooms[i].label != peerName {
+			m.rooms[i].label = peerName
+			m.syncRoomItems()
+		}
+		return
+	}
+	label := peerName
+	if label == "" {
+		label = peerID
+	}
+	m.rooms = append(m.rooms, roomEntry{name: key, label: label, isDM: true, peerID: peerID})
+	m.syncRoomItems()
+}
+
+// removeEntry drops a room/DM entry and its buffered feed, fixing the active
+// selection so it still points at a valid row (or -1 once the list empties).
+func (m *Model) removeEntry(name string) {
+	i := m.roomIndex(name)
+	if i < 0 {
+		return
+	}
+	m.rooms = append(m.rooms[:i], m.rooms[i+1:]...)
+	delete(m.feeds, name)
+	delete(m.loaded, name)
+	switch {
+	case len(m.rooms) == 0:
+		m.active = -1
+	case m.active > i:
+		m.active--
+	case m.active == i && m.active >= len(m.rooms):
+		m.active = len(m.rooms) - 1
+	}
+	m.syncRoomItems()
+	if m.active >= 0 {
+		m.refreshViewport()
+	} else {
+		m.viewport.SetContent("")
+	}
 }
 
 // ensureAndActivate adds (if needed) and activates a room, batching any
@@ -457,40 +664,97 @@ func (m *Model) activate(i int) tea.Cmd {
 	}
 	m.active = i
 	m.rooms[i].unread = 0
-	m.syncRoomItems()
-	m.roomList.Select(i)
+	m.syncRoomItems() // selects the active row in whichever list owns it
 
 	var cmd tea.Cmd
 	name := m.rooms[i].name
-	if !m.loaded[name] && name != directBucket {
+	if !m.loaded[name] && !m.rooms[i].isDM {
 		cmd = m.historyCmd(name)
 	}
 	m.refreshViewport()
 	return cmd
 }
 
-// nextRoom / prevRoom move the active selection with wrap-around.
-func (m *Model) nextRoom() tea.Cmd {
-	if len(m.rooms) == 0 {
+// navOrder returns the global entry indices in visual order: all rooms (in slice
+// order) followed by all DM threads (in slice order), matching how the left pane
+// stacks the two sections. Navigation walks this order, not the raw slice, so
+// stepping never jumps between the sections out of visual sequence.
+func (m Model) navOrder() []int {
+	order := make([]int, 0, len(m.rooms))
+	for i, r := range m.rooms {
+		if !r.isDM {
+			order = append(order, i)
+		}
+	}
+	for i, r := range m.rooms {
+		if r.isDM {
+			order = append(order, i)
+		}
+	}
+	return order
+}
+
+// navPos returns the position of the active entry within navOrder, or -1.
+func (m Model) navPos(order []int) int {
+	for p, gi := range order {
+		if gi == m.active {
+			return p
+		}
+	}
+	return -1
+}
+
+// moveSelection steps the active selection by delta within the visual order,
+// clamped to the ends (no wrap).
+func (m *Model) moveSelection(delta int) tea.Cmd {
+	order := m.navOrder()
+	if len(order) == 0 {
 		return nil
 	}
-	return m.activate((m.active + 1 + len(m.rooms)) % len(m.rooms))
+	pos := m.navPos(order)
+	if pos < 0 {
+		pos = 0
+	} else {
+		pos = clamp(pos+delta, 0, len(order)-1)
+	}
+	return m.activate(order[pos])
+}
+
+// nextRoom / prevRoom move the active selection with wrap-around, in visual order.
+func (m *Model) nextRoom() tea.Cmd {
+	order := m.navOrder()
+	if len(order) == 0 {
+		return nil
+	}
+	pos := m.navPos(order)
+	return m.activate(order[(pos+1+len(order))%len(order)])
 }
 
 func (m *Model) prevRoom() tea.Cmd {
-	if len(m.rooms) == 0 {
+	order := m.navOrder()
+	if len(order) == 0 {
 		return nil
 	}
-	return m.activate((m.active - 1 + len(m.rooms)) % len(m.rooms))
+	pos := m.navPos(order)
+	if pos < 0 {
+		pos = 0
+	}
+	return m.activate(order[(pos-1+len(order))%len(order)])
 }
 
-// onMessage records an incoming message, updating unread or the live feed.
+// onMessage records an incoming message, updating unread or the live feed. A
+// direct message (empty Room) is routed to a per-sender DM thread; a room
+// message to its room.
 func (m Model) onMessage(ev natsclient.MessageEvent) (tea.Model, tea.Cmd) {
-	bucket := ev.Room
-	if bucket == "" {
-		bucket = directBucket
+	var bucket string
+	var cmd tea.Cmd
+	if ev.Room == "" {
+		bucket = dmKey(ev.Msg.FromID)
+		m.ensureDM(ev.Msg.FromID, ev.Msg.From)
+	} else {
+		bucket = ev.Room
+		cmd = m.ensureRoom(bucket)
 	}
-	cmd := m.ensureRoom(bucket)
 	m.feeds[bucket] = append(m.feeds[bucket], ev.Msg)
 	if bucket == m.activeName() {
 		m.refreshViewport()

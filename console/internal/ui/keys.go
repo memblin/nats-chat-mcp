@@ -4,6 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	natsclient "github.com/memblin/nats-chat-mcp/console/internal/nats"
 )
 
 // onKey routes a key press: global shortcuts first, then by search mode and
@@ -19,6 +21,11 @@ func (m Model) onKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// anything else cancels) so nothing underneath can react.
 	if m.confirm != nil {
 		return m.onConfirmKey(msg)
+	}
+
+	// The "new DM" picker is likewise modal while open.
+	if m.picker != nil {
+		return m.onPickerKey(msg)
 	}
 
 	// Search mode is self-contained: every other key edits/commits the query so
@@ -82,10 +89,15 @@ func (m Model) onComposeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyEnter:
 		content := strings.TrimSpace(m.input.Value())
-		room := m.activeName()
 		m.input.SetValue("")
-		if content != "" && room != "" && room != directBucket {
-			return m, m.sendCmd(room, content)
+		if content == "" {
+			return m, nil
+		}
+		if e := m.activeEntry(); e != nil {
+			if e.isDM {
+				return m, m.sendDMCmd(e.peerID, content)
+			}
+			return m, m.sendCmd(e.name, content)
 		}
 		return m, nil
 	}
@@ -132,15 +144,19 @@ func (m Model) onFeedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) onRoomsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "k", "up":
-		cmd := m.activate(clamp(m.roomList.Index()-1, 0, len(m.rooms)-1))
-		return m, cmd
+		return m, m.moveSelection(-1)
 	case "j", "down":
-		cmd := m.activate(clamp(m.roomList.Index()+1, 0, len(m.rooms)-1))
-		return m, cmd
+		return m, m.moveSelection(1)
 	case "enter":
 		return m, m.setFocus(zoneFeed)
 	case "m":
 		return m, m.toggleMouse()
+	case "d":
+		// Open the "new DM" picker, seeded from the live presence list.
+		return m.startNewDM()
+	case "c":
+		// Close the active DM thread (purging its NATS messages).
+		return m.startCloseDM()
 	case "x":
 		// Evict stale participants in the active room.
 		return m.startEvict(m.activeName())
@@ -159,19 +175,89 @@ func (m Model) onRoomsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // the key never feels dead — it then just reports there is nothing to do.
 func (m Model) startEvict(room string) (tea.Model, tea.Cmd) {
 	targets := staleParticipants(m.presence, m.now, room, m.self.ID)
-	m.confirm = &confirmState{scope: room, targets: targets}
+	m.confirm = &confirmState{kind: confirmEvict, scope: room, targets: targets}
 	return m, nil
 }
 
-// onConfirmKey handles keys while the eviction modal is open: y/Y evicts, every
-// other key (including Esc) cancels.
-func (m Model) onConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	targets := m.confirm.targets
-	m.confirm = nil
-	if s := msg.String(); (s == "y" || s == "Y") && len(targets) > 0 {
-		return m, m.evictCmd(targets)
+// startCloseDM opens the close confirmation for the active DM thread. It is a
+// no-op when the active entry is not a DM, so "c" is inert outside a thread.
+func (m Model) startCloseDM() (tea.Model, tea.Cmd) {
+	e := m.activeEntry()
+	if e == nil || !e.isDM {
+		return m, nil
+	}
+	m.confirm = &confirmState{
+		kind:     confirmCloseDM,
+		peerID:   e.peerID,
+		peerName: e.label,
+		msgCount: len(m.feeds[e.name]),
 	}
 	return m, nil
+}
+
+// startNewDM opens the agent picker, seeded from the live presence list minus
+// this console's own identity. With nobody else present the modal still opens and
+// reports there is nobody to message.
+func (m Model) startNewDM() (tea.Model, tea.Cmd) {
+	var agents []natsclient.Presence
+	for _, p := range dedupePresence(m.presence) {
+		if p.ID != m.self.ID {
+			agents = append(agents, p)
+		}
+	}
+	m.picker = &pickerState{agents: agents}
+	return m, nil
+}
+
+// onConfirmKey handles keys while a destructive-action modal is open: y/Y
+// confirms, every other key (including Esc) cancels.
+func (m Model) onConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	c := m.confirm
+	m.confirm = nil
+	s := msg.String()
+	confirmed := s == "y" || s == "Y"
+	if !confirmed {
+		return m, nil
+	}
+	switch c.kind {
+	case confirmEvict:
+		if len(c.targets) > 0 {
+			return m, m.evictCmd(c.targets)
+		}
+	case confirmCloseDM:
+		return m, m.purgeDMCmd(c.peerID)
+	}
+	return m, nil
+}
+
+// onPickerKey handles keys while the "new DM" picker is open: up/down (j/k) move
+// the highlight, Enter opens the chosen peer's thread, any other key cancels.
+func (m Model) onPickerKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := m.picker
+	switch msg.String() {
+	case "k", "up":
+		if p.idx > 0 {
+			p.idx--
+		}
+		return m, nil
+	case "j", "down":
+		if p.idx < len(p.agents)-1 {
+			p.idx++
+		}
+		return m, nil
+	case "enter":
+		m.picker = nil
+		if p.idx < 0 || p.idx >= len(p.agents) {
+			return m, nil
+		}
+		peer := p.agents[p.idx]
+		m.ensureDM(peer.ID, peer.Name)
+		cmd := m.activate(m.roomIndex(dmKey(peer.ID)))
+		return m, tea.Batch(cmd, m.setFocus(zoneCompose))
+	default:
+		m.picker = nil
+		return m, nil
+	}
 }
 
 // onSearchKey handles keys while the "/" search filter is being typed.
