@@ -38,6 +38,14 @@ var (
 	styleDotConnected    = lipgloss.NewStyle().Background(colBg).Foreground(colGreen)
 	styleDotDisconnected = lipgloss.NewStyle().Background(colBg).Foreground(colRed)
 	styleDotReconnecting = lipgloss.NewStyle().Background(colBg).Foreground(colYellow)
+
+	// styleStatusMouseOff flags that mouse reporting is disabled (so the terminal
+	// can select/copy) — shown only while it is off, since on is the default.
+	styleStatusMouseOff = lipgloss.NewStyle().
+				Background(colBg).
+				Foreground(colYellow).
+				Bold(true).
+				Padding(0, 1)
 )
 
 // Panes — bordered boxes whose border color signals focus. The focused pane

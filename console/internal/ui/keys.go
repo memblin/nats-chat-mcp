@@ -112,6 +112,8 @@ func (m Model) onFeedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		m.newestBottom = !m.newestBottom
 		m.refreshViewport()
+	case "m":
+		return m, m.toggleMouse()
 	case "/":
 		m.searching = true
 		m.searchQuery = ""
@@ -137,6 +139,8 @@ func (m Model) onRoomsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case "enter":
 		return m, m.setFocus(zoneFeed)
+	case "m":
+		return m, m.toggleMouse()
 	case "x":
 		// Evict stale participants in the active room.
 		return m.startEvict(m.activeName())
