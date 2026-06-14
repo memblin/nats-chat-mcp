@@ -11,6 +11,7 @@ import {
 } from "../identity.js";
 import { assertValidToken, ensureDirectConsumer } from "../stream-manager.js";
 import { NATS_URL } from "../nats-client.js";
+import { resetWaitReturn } from "../wakeups.js";
 import { registerRoomTools } from "./rooms.js";
 import { registerMessagingTools } from "./messaging.js";
 import { registerDirectTools } from "./direct.js";
@@ -49,6 +50,9 @@ function registerIdentityTools(server: McpServer): void {
     async ({ name }) => {
       assertValidToken("agent name", name);
       const identity = await register(name);
+      // Clear any prior per-identity wait cooldown so a re-registering session
+      // starts clean and isn't rejected on its first wait_for_message.
+      resetWaitReturn(identity.id);
       // Create the DM consumer eagerly at registration time so a direct message
       // sent right after this agent registers isn't missed before its first
       // check_direct call (the consumer's cursor must exist to capture it).
