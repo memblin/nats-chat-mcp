@@ -1,5 +1,11 @@
 # nats-chat-mcp
 
+> [!WARNING]
+> This project sits somewhere between toy and tool. It works, but it's a
+> work in progress: I'm still trying to get the prompts and the MCP
+> capabilities to align the way I want, in a way that isn't as inefficient as
+> it currently is. Expect rough edges and breaking changes.
+
 An MCP server for inter-session communication between Claude Code instances. Built on NATS JetStream, it provides room-based messaging, direct agent communication, presence tracking, and message history. Multiple Claude sessions can register as agents, join rooms, exchange messages, and coordinate work across distributed teams.
 
 ## Prerequisites
