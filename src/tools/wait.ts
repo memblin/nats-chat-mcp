@@ -11,7 +11,54 @@ import { waitForMessages } from "../stream-manager.js";
 import { jsonResult } from "./register.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
-const MAX_TIMEOUT_MS = 120000;
+const MAX_TIMEOUT_MS = 1800000; // 30 minutes — agents in known-long-wait states
+
+// How often to refresh presence while blocked in a long wait. Must stay
+// comfortably under the presence TTL (15 min, see stream-manager.ts) so an
+// agent in a multi-minute wait doesn't lapse out of the registry mid-block.
+const PRESENCE_KEEPALIVE_MS = 10 * 60 * 1000;
+
+// Per-identity count of consecutive empty (timed-out) wakeups, kept in process
+// memory so an agent gets the running tally back without tracking it itself. One
+// MCP process owns one identity, but we key by id to stay correct regardless.
+const emptyWakeups = new Map<string, number>();
+
+/**
+ * Update and return the consecutive-empty-wakeup tally for an identity: reset to
+ * 0 when the wait delivered something, otherwise increment. Exported for unit
+ * testing the counting rule without a broker.
+ */
+export function trackEmptyWakeups(id: string, timedOut: boolean): number {
+  const next = timedOut ? (emptyWakeups.get(id) ?? 0) + 1 : 0;
+  emptyWakeups.set(id, next);
+  return next;
+}
+
+/** Test-only: clear the in-memory tallies so cases don't bleed into each other. */
+export function resetEmptyWakeupsForTests(): void {
+  emptyWakeups.clear();
+}
+
+/**
+ * Refresh presence on an interval for the duration of a blocking wait, returning
+ * a stop function to clear it. Without this a wait longer than the presence TTL
+ * would let the agent's TTL-backed presence lapse mid-block. Refresh failures
+ * are swallowed — the next tick retries, and a single missed write is harmless.
+ * Exported for unit testing the interval behavior with fake timers.
+ */
+export function startPresenceKeepalive(
+  intervalMs: number = PRESENCE_KEEPALIVE_MS,
+): () => void {
+  const timer = setInterval(() => {
+    void syncPresence().catch(() => {
+      /* transient — the next tick (or the agent's next call) retries */
+    });
+  }, intervalMs);
+  // The wait's awaited promise keeps the loop alive; this timer shouldn't on its
+  // own, so a stray keepalive can never hold the process open.
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
 
 export function registerWaitTools(server: McpServer): void {
   server.registerTool(
@@ -28,7 +75,7 @@ export function registerWaitTools(server: McpServer): void {
           .max(MAX_TIMEOUT_MS)
           .optional()
           .describe(
-            "How long to block before returning an empty result (default 30000, max 120000).",
+            "How long to block before returning an empty result (default 30000, max 1800000 = 30 minutes).",
           ),
       },
     },
@@ -43,24 +90,36 @@ export function registerWaitTools(server: McpServer): void {
       const rooms = getRooms();
       const timeout = timeout_ms ?? DEFAULT_TIMEOUT_MS;
 
-      // Keep presence fresh up front: a long block shouldn't let this agent's
-      // TTL-backed presence lapse while it sits idle waiting.
+      // Keep presence fresh up front, then on an interval for the duration of
+      // the block — a long wait shouldn't let this agent's TTL-backed presence
+      // lapse while it sits idle waiting.
       await syncPresence();
+      const stopKeepalive = startPresenceKeepalive();
 
       const start = Date.now();
-      const { roomMessages, directMessages } = await waitForMessages(
-        identity.id,
-        rooms,
-        timeout,
-      );
+      let roomMessages, directMessages;
+      try {
+        ({ roomMessages, directMessages } = await waitForMessages(
+          identity.id,
+          rooms,
+          timeout,
+        ));
+      } finally {
+        stopKeepalive();
+      }
       const elapsed_ms = Date.now() - start;
 
       const timed_out =
         roomMessages.length === 0 && directMessages.length === 0;
+      const consecutive_empty_wakeups = trackEmptyWakeups(
+        identity.id,
+        timed_out,
+      );
 
       return jsonResult({
         timed_out,
         elapsed_ms,
+        consecutive_empty_wakeups,
         room_messages: roomMessages,
         direct_messages: directMessages,
       });
