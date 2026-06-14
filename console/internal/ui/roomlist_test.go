@@ -18,12 +18,13 @@ func TestLeftSplitBudgetsDivider(t *testing.T) {
 			pres("Bob", "2026-06-13T14:00:00.000Z"),
 		},
 	}
-	roomLines, presenceLines := m.leftSplit()
+	roomLines, dmLines, presenceLines := m.leftSplit()
 	const roomsHeader = 1
-	used := roomsHeader + roomLines + leftDividerLines + presenceLines
+	// No DM threads here, so the DM section collapses (dmLines == 0, no header).
+	used := roomsHeader + roomLines + dmLines + leftDividerLines + presenceLines
 	if used != m.paneContentH {
-		t.Errorf("left column uses %d rows, want exactly paneContentH=%d (rooms hdr %d + rooms %d + divider %d + presence %d)",
-			used, m.paneContentH, roomsHeader, roomLines, leftDividerLines, presenceLines)
+		t.Errorf("left column uses %d rows, want exactly paneContentH=%d (rooms hdr %d + rooms %d + dm %d + divider %d + presence %d)",
+			used, m.paneContentH, roomsHeader, roomLines, dmLines, leftDividerLines, presenceLines)
 	}
 }
 
