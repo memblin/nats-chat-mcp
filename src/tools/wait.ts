@@ -8,6 +8,7 @@ import {
   syncPresence,
 } from "../identity.js";
 import { waitForMessages } from "../stream-manager.js";
+import { recordWaitResult } from "../wakeups.js";
 import { jsonResult } from "./register.js";
 
 const DEFAULT_TIMEOUT_MS = 30000;
@@ -17,27 +18,6 @@ const MAX_TIMEOUT_MS = 1800000; // 30 minutes — agents in known-long-wait stat
 // comfortably under the presence TTL (15 min, see stream-manager.ts) so an
 // agent in a multi-minute wait doesn't lapse out of the registry mid-block.
 const PRESENCE_KEEPALIVE_MS = 10 * 60 * 1000;
-
-// Per-identity count of consecutive empty (timed-out) wakeups, kept in process
-// memory so an agent gets the running tally back without tracking it itself. One
-// MCP process owns one identity, but we key by id to stay correct regardless.
-const emptyWakeups = new Map<string, number>();
-
-/**
- * Update and return the consecutive-empty-wakeup tally for an identity: reset to
- * 0 when the wait delivered something, otherwise increment. Exported for unit
- * testing the counting rule without a broker.
- */
-export function trackEmptyWakeups(id: string, timedOut: boolean): number {
-  const next = timedOut ? (emptyWakeups.get(id) ?? 0) + 1 : 0;
-  emptyWakeups.set(id, next);
-  return next;
-}
-
-/** Test-only: clear the in-memory tallies so cases don't bleed into each other. */
-export function resetEmptyWakeupsForTests(): void {
-  emptyWakeups.clear();
-}
 
 /**
  * Refresh presence on an interval for the duration of a blocking wait, returning
@@ -111,7 +91,7 @@ export function registerWaitTools(server: McpServer): void {
 
       const timed_out =
         roomMessages.length === 0 && directMessages.length === 0;
-      const consecutive_empty_wakeups = trackEmptyWakeups(
+      const consecutive_empty_wakeups = recordWaitResult(
         identity.id,
         timed_out,
       );

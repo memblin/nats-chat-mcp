@@ -21,3 +21,25 @@ export interface Message {
   timestamp: string;
   reply_to?: string;
 }
+
+/** Handling states a send_ack can report back to a message's sender. */
+export type AckStatus =
+  | "received"
+  | "investigating"
+  | "dispatching"
+  | "in_progress"
+  | "blocked"
+  | "complete";
+
+/**
+ * A lightweight acknowledgment. It rides the same direct-message subject as a
+ * normal Message (so existing consumers and the console read it without change)
+ * but carries `type: "ack"` plus the ack fields, letting recipients render it as
+ * a status badge rather than a chat turn.
+ */
+export interface AckMessage extends Message {
+  type: "ack";
+  regarding: string;
+  status: AckStatus;
+  note?: string;
+}

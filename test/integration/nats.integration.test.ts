@@ -15,7 +15,12 @@ import {
   listPresence,
   waitForMessages,
 } from "../../src/stream-manager.js";
-import { register, newMessage, syncPresence } from "../../src/identity.js";
+import {
+  register,
+  newAck,
+  newMessage,
+  syncPresence,
+} from "../../src/identity.js";
 
 let nats: NatsHandle;
 let roomSeq = 0;
@@ -174,5 +179,38 @@ describe("presence registry (KV)", () => {
     expect(self).toBeDefined();
     expect(self!.name).toBe("frank");
     expect(self!.last_seen).toBeTruthy();
+  });
+});
+
+describe("send_ack (direct ack envelope)", () => {
+  test("delivers an ack envelope (type: 'ack') to the recipient's direct inbox", async () => {
+    // Sender's identity stamps the ack's from/from_id.
+    await register("acker");
+
+    // A distinct recipient inbox; create its consumer so the ack is captured.
+    const recipientId = "arecipientackinbox";
+    await ensureDirectConsumer(recipientId);
+
+    const ack = newAck("rc13 publish handoff", "investigating", "on it");
+    expect(ack.type).toBe("ack");
+    expect(ack.regarding).toBe("rc13 publish handoff");
+    expect(ack.status).toBe("investigating");
+    expect(ack.note).toBe("on it");
+
+    await publishDirectMessage(recipientId, ack);
+
+    const messages = await fetchDirectMessages(recipientId);
+    expect(messages).toHaveLength(1);
+    // Extra ack fields survive the round-trip on the direct subject.
+    const received = messages[0] as unknown as {
+      type?: string;
+      regarding?: string;
+      status?: string;
+      from: string;
+    };
+    expect(received.type).toBe("ack");
+    expect(received.regarding).toBe("rc13 publish handoff");
+    expect(received.status).toBe("investigating");
+    expect(received.from).toBe("acker");
   });
 });
