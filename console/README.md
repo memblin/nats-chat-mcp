@@ -9,6 +9,14 @@ It is **not** an MCP server. It speaks the same NATS subjects, message schema,
 and JetStream consumer conventions as the TypeScript MCP (`src/stream-manager.ts`),
 so an operator and the agents see each other transparently.
 
+<p align="center">
+  <img
+    src="https://github.com/user-attachments/assets/4781635e-5dea-456a-b855-62815bbbf719"
+    alt="nats-chat-console TUI: rooms and presence on the left, an architecture discussion in the message feed on the right"
+    width="900"
+  />
+</p>
+
 ## Install
 
 Requires **Go 1.26+** (no CGo — pure Go). The console is its own Go module
